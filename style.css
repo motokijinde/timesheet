@@ -27,7 +27,9 @@ body {
     width: 100%; 
     max-width: 450px; 
     box-sizing: border-box; 
-    position: relative; /* バッジ配置の基準点 */
+    position: relative;
+    /* モバイル向けセンタリング調整 */
+    margin: 0 auto; 
 }
 
 #loginArea { display: block; text-align: center; margin-top: 50px; max-width: 350px; }
@@ -98,15 +100,16 @@ button:active { opacity: 0.7; }
 
 .day { 
     aspect-ratio: 1/1.4; 
-    border: 1px solid #f0f0f0; 
+    border: 1px solid #f8f8f8; 
     border-radius: 10px; 
-    padding: 4px; 
+    padding: 2px; 
     font-size: 10px; 
     background: #fff; 
     cursor: pointer; 
     display: flex; 
     flex-direction: column; 
     transition: background 0.2s;
+    overflow: hidden;
 }
 .day:hover { background-color: #fafafa; }
 .day.sat { background-color: var(--sat); }
@@ -123,26 +126,28 @@ button:active { opacity: 0.7; }
 }
 .holiday-lbl {
     font-size: 8px;
-    color: #e53935;
+    color: #c62828;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 55px;
     font-weight: normal;
+    /* モバイル用に幅制限を解除または調整 */
+    max-width: none; 
 }
 
 /* カレンダー内の勤務記録ラベル */
 .entry { 
     font-size: 8.5px; 
-    margin-top: 2px; 
-    padding: 2px 4px;
-    border-radius: 4px;
+    margin-top: 1px; 
+    line-height: 1.1; 
+    padding: 1px 2px;
+    border-radius: 3px;
     white-space: nowrap; 
     overflow: hidden; 
     font-weight: bold;
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 1px;
 }
 
 /* ボタンの色と同期させた背景色 */
