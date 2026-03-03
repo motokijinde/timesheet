@@ -4,290 +4,97 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>勤務報告ポチるだけ</title>
-    <style>
-        :root { --primary: #464eb8; --start: #e3f2fd; --end: #fff3e0; --bg: #f8f9fa; --sat: #e8f4ff; --sun: #ffebee; }
-        body { font-family: -apple-system, sans-serif; background: var(--bg); display: flex; flex-direction: column; align-items: center; padding: 10px; margin: 0; }
-        .container { background: white; padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); width: 100%; max-width: 450px; box-sizing: border-box; }
-        h2 { color: var(--primary); margin: 5px 0 20px 0; text-align: center; font-size: 22px; }
-        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
-        button { padding: 14px; border-radius: 12px; border: 1px solid #eee; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s; }
-        button:active { transform: scale(0.95); opacity: 0.8; }
-        .btn-start { background: var(--start); color: #1976d2; border-color: #d1e9ff; }
-        .btn-end { background: var(--end); color: #f57c00; border-color: #ffecd1; }
-        .month-selector { display: flex; align-items: center; justify-content: space-between; margin: 15px 0; padding: 0 5px; }
-        .nav-btn { background: #f0f0f0; border: none; padding: 8px 15px; border-radius: 8px; font-size: 12px; color: #555; }
-        .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 10px; }
-        .day-header { font-size: 11px; font-weight: bold; color: #aaa; text-align: center; padding-bottom: 8px; }
-        .day { aspect-ratio: 1 / 1.4; border: 1px solid #f8f8f8; border-radius: 10px; cursor: pointer; padding: 5px; font-size: 10px; position: relative; overflow: hidden; background: #fff; display: flex; flex-direction: column; }
-        .day.sat { background-color: var(--sat); }
-        .day.sun, .day.holiday { background-color: var(--sun); }
-        .day.today { border: 2px solid var(--primary); z-index: 1; }
-        .day-num { font-weight: bold; font-size: 11px; }
-        .holiday-name { font-size: 7px; color: #c62828; white-space: nowrap; overflow: hidden; height: 10px; margin: 1px 0; }
-        .entry { font-size: 8px; line-height: 1.2; white-space: nowrap; margin-top: 1px; }
-        .absent-mark { color: #d32f2f; font-weight: bold; background: #fff1f1; }
-        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); align-items: center; justify-content: center; z-index: 1000; }
-        .modal-content { background: white; padding: 25px; border-radius: 24px; width: 85%; max-width: 320px; }
-        .form-item { margin-bottom: 15px; }
-        .form-item label { display: block; font-size: 12px; color: #888; margin-bottom: 5px; }
-        .form-item input { width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 10px; box-sizing: border-box; font-size: 16px; background: #fbfbfb; }
-        .footer { margin-top: 25px; display: flex; flex-direction: column; align-items: center; }
-        .copy-btn { width: 100%; background: var(--primary); color: white; border: none; padding: 16px; font-size: 16px; border-radius: 14px; }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- ローディング表示（通信中に表示） -->
+    <div id="loader" class="loading-overlay">通信中...</div>
 
-<div class="container">
-    <h2>勤務報告ポチるだけ</h2>
-    <div id="msg" style="text-align:center; height:24px; font-size:13px; color:var(--primary); font-weight:500;"></div>
-    
-    <div class="btn-group">
-        <button class="btn-start" onclick="quickLog('start', '出社')">出社で開始</button>
-        <button class="btn-start" onclick="quickLog('start', '在宅')">在宅で開始</button>
-        <button class="btn-end" onclick="quickLog('end')" style="grid-column: span 2;">作業を終了する</button>
-    </div>
-
-    <div class="month-selector">
-        <button class="nav-btn" onclick="changeMonth(-1)">◀ 前月</button>
-        <div id="monthDisplay" style="font-weight:700; font-size:17px;"></div>
-        <button class="nav-btn" onclick="changeMonth(1)">次月 ▶</button>
-    </div>
-
-    <div class="calendar" id="calendar"></div>
-
-    <div class="footer">
-        <button class="copy-btn" onclick="copyForExcel()">1ヶ月分を書き出す</button>
-        <button onclick="clearAll()" style="background:none; border:none; color:#bbb; font-size:11px; margin-top:20px; cursor:pointer;">データをリセット</button>
-    </div>
-</div>
-
-<div class="modal" id="editModal">
-    <div class="modal-content">
-        <h4 id="editDateLabel" style="margin:0 0 20px 0; color:#333;"></h4>
-        <div class="form-item" style="display:flex; align-items:center; gap:10px;">
-            <input type="checkbox" id="editIsAbsent" onchange="toggleAbsent()" style="width:20px; height:20px;"> 
-            <label style="color:#d32f2f; font-weight:bold; margin:0;">欠勤 / 休暇</label>
-        </div>
+    <!-- 1. ログイン画面 -->
+    <div id="loginArea">
+        <h2>勤務報告ポチるだけ</h2>
         <div class="form-item">
-            <label>場所 または 理由</label>
-            <input type="text" id="editPlace" list="places">
-            <datalist id="places"><option value="出社"><option value="在宅"><option value="有給"><option value="病欠"></datalist>
+            <input type="text" id="userNameInput" placeholder="ユーザー名を入力">
         </div>
-        <div id="timeInputs">
-            <div class="form-item"><label>開始時刻</label><input type="time" id="editStart"></div>
-            <div class="form-item"><label>終了時刻</label><input type="time" id="editEnd"></div>
-        </div>
-        <button onclick="saveEdit()" style="width:100%; background:var(--primary); color:white; border:none; padding:14px; border-radius:12px; font-weight:bold;">保存する</button>
-        <button onclick="closeModal()" style="width:100%; background:none; border:none; margin-top:10px; color:#999; font-size:14px;">閉じる</button>
+        <button onclick="login()" class="btn-primary">ログイン</button>
     </div>
-</div>
 
-<script>
-    let currentData = JSON.parse(localStorage.getItem('workLogV12') || '{}');
-    let viewDate = new Date();
-    let editingKey = null;
+    <!-- 2. メインアプリ画面 -->
+    <div class="container" id="mainApp" style="display: none;">
+        
+        <!-- ユーザーバッジ（右上配置） -->
+        <div class="user-badge" onclick="logout()" title="ログアウト">
+            <span id="displayUserName">ユーザー</span>
+            <svg viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+        </div>
 
-    function getHolidayName(y, m, d) {
-        const date = new Date(y, m - 1, d);
-        const day = date.getDay();
-        const mmdd = `${m}/${d}`;
-        if (mmdd === "1/1") return "元日";
-        if (m === 1 && day === 1 && Math.floor((d - 1) / 7) === 1) return "成人の日";
-        if (mmdd === "2/11") return "建国記念の日";
-        if (mmdd === "2/23") return "天皇誕生日";
-        if (y === 2026 && mmdd === "3/20") return "春分の日";
-        if (mmdd === "4/29") return "昭和の日";
-        if (mmdd === "5/3") return "憲法記念日";
-        if (mmdd === "5/4") return "みどりの日";
-        if (mmdd === "5/5") return "こどもの日";
-        if (m === 7 && day === 1 && Math.floor((d - 1) / 7) === 2) return "海の日";
-        if (mmdd === "8/11") return "山の日";
-        if (m === 9 && day === 1 && Math.floor((d - 1) / 7) === 2) return "敬老の日";
-        if (y === 2026 && mmdd === "9/23") return "秋分の日";
-        if (m === 10 && day === 1 && Math.floor((d - 1) / 7) === 1) return "スポーツの日";
-        if (mmdd === "11/3") return "文化の日";
-        if (mmdd === "11/23") return "勤労感謝の日";
-        if (day === 1) {
-            const prev = new Date(y, m - 1, d - 1);
-            if (getHolidayName(y, prev.getMonth()+1, prev.getDate())) return "振替休日";
-        }
-        return null;
-    }
+        <h2>勤務報告ポチるだけ</h2>
+        <div id="msg"></div>
+        
+        <!-- クイック入力ボタン -->
+        <div class="btn-group">
+            <button class="btn-start" onclick="quickLog('start', '出社')">出社で開始</button>
+            <button class="btn-start" onclick="quickLog('start', '在宅')">在宅で開始</button>
+            <button class="btn-end" onclick="quickLog('end')" style="grid-column: span 2;">作業を終了する</button>
+        </div>
 
-    function initCalendar() {
-        const year = viewDate.getFullYear();
-        const month = viewDate.getMonth();
-        const today = new Date();
-        document.getElementById('monthDisplay').innerText = `${year}年 ${month + 1}月`;
-        const firstDay = new Date(year, month, 1).getDay();
-        const lastDate = new Date(year, month + 1, 0).getDate();
-        const calEl = document.getElementById('calendar');
-        calEl.innerHTML = '';
-        ['日','月','火','水','木','金','土'].forEach((d, i) => {
-            const div = document.createElement('div');
-            div.className = 'day-header';
-            if(i===0) div.style.color = '#e57373'; if(i===6) div.style.color = '#64b5f6';
-            div.innerText = d;
-            calEl.appendChild(div);
-        });
-        for (let i = 0; i < firstDay; i++) calEl.appendChild(document.createElement('div'));
-        for (let d = 1; d <= lastDate; d++) {
-            const dateKey = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-            const dayOfWeek = new Date(year, month, d).getDay();
-            const holName = getHolidayName(year, month + 1, d);
-            const data = currentData[dateKey] || {};
-            const dayEl = document.createElement('div');
-            dayEl.className = 'day';
-            if (dayOfWeek === 0 || holName) dayEl.classList.add('sun');
-            if (dayOfWeek === 6) dayEl.classList.add('sat');
-            if (d === today.getDate() && month === today.getMonth() && year === today.getFullYear()) dayEl.classList.add('today');
-            dayEl.onclick = () => openEdit(dateKey, d);
-            dayEl.innerHTML = `<div class="day-num">${d}</div>`;
-            if (holName) dayEl.innerHTML += `<div class="holiday-name">${holName}</div>`;
-            if (data.isAbsent) {
-                dayEl.innerHTML += `<div class="entry absent-mark">休み(${data.place})</div>`;
-            } else {
-                if (data.start) dayEl.innerHTML += `<div class="entry" style="color:#1976d2; background:#e3f2fd;">▶ ${data.start}</div>`;
-                if (data.end) dayEl.innerHTML += `<div class="entry" style="color:#f57c00; background:#fff3e0;">■ ${data.end}</div>`;
-            }
-            calEl.appendChild(dayEl);
-        }
-    }
+        <!-- 月切り替え -->
+        <div class="month-selector">
+            <button class="nav-btn" onclick="changeMonth(-1)">◀ 前月</button>
+            <div id="monthDisplay"></div>
+            <button class="nav-btn" onclick="changeMonth(1)">次月 ▶</button>
+        </div>
 
-    function changeMonth(diff) {
-        viewDate.setMonth(viewDate.getMonth() + diff);
-        initCalendar();
-    }
+        <!-- カレンダー本体 -->
+        <div class="calendar" id="calendar"></div>
 
-    function timeToMin(t) {
-        if (!t) return 0;
-        const [h, m] = t.split(':').map(Number);
-        return h * 60 + m;
-    }
+        <!-- フッター操作 -->
+        <div class="footer">
+            <button class="copy-btn" onclick="copyForExcel()">1ヶ月分を書き出す</button>
+        </div>
+    </div>
 
-    function minToHStr(min) {
-        if (min <= 0) return "0:00";
-        const h = Math.floor(min / 60);
-        const m = min % 60;
-        return `${h}:${String(m).padStart(2, '0')}`;
-    }
+    <!-- 3. 編集モーダル（日付クリック時に表示） -->
+    <div class="modal" id="editModal" style="display: none;">
+        <div class="modal-content">
+            <h4 id="editDateLabel"></h4>
+            
+            <div class="form-item row">
+                <input type="checkbox" id="editIsAbsent" onchange="toggleAbsent()"> 
+                <label for="editIsAbsent">欠勤 / 休暇</label>
+            </div>
 
-    function quickLog(type, place) {
-        const now = new Date();
-        const key = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-        if (!currentData[key]) currentData[key] = { isAbsent: false, place: '', start: '', end: '' };
-        let h = now.getHours(); let m = now.getMinutes();
-        if (type === 'start') {
-            if (h < 9) { h = 9; m = 0; }
-            else if (m > 0) { m = Math.ceil(m / 10) * 10; if (m === 60) { h++; m = 0; } }
-            const timeStr = `${h}:${String(m).padStart(2, '0')}`;
-            currentData[key].start = timeStr; currentData[key].place = place;
-            copyToClipboard(`作業開始　${place}　${timeStr}`);
-        } else {
-            m = Math.floor(m / 10) * 10;
-            const timeStr = `${h}:${String(m).padStart(2, '0')}`;
-            currentData[key].end = timeStr;
-            copyToClipboard(`作業終了　${timeStr}`);
-        }
-        localStorage.setItem('workLogV12', JSON.stringify(currentData));
-        initCalendar(); showMsg("記録を保存し、Teams用にコピーしました");
-    }
+            <div class="form-item">
+                <label class="lbl">勤務場所 または 理由</label>
+                <input type="text" id="editPlace" list="places" placeholder="出社、在宅など">
+                <datalist id="places">
+                    <option value="出社">
+                    <option value="在宅">
+                    <option value="新横浜">
+                    <option value="有給">
+                    <option value="特休">
+                    <option value="病欠">
+                </datalist>
+            </div>
 
-    function openEdit(key, d) {
-        editingKey = key;
-        const data = currentData[key] || {};
-        document.getElementById('editDateLabel').innerText = key;
-        document.getElementById('editIsAbsent').checked = data.isAbsent || false;
-        document.getElementById('editPlace').value = data.place || '';
-        document.getElementById('editStart').value = data.start || '';
-        document.getElementById('editEnd').value = data.end || '';
-        toggleAbsent();
-        document.getElementById('editModal').style.display = 'flex';
-    }
+            <div id="timeInputs">
+                <div class="form-item">
+                    <label class="lbl">開始時間</label>
+                    <input type="time" id="editStart">
+                </div>
+                <div class="form-item">
+                    <label class="lbl">終了時間</label>
+                    <input type="time" id="editEnd">
+                </div>
+            </div>
 
-    function saveEdit() {
-        currentData[editingKey] = {
-            isAbsent: document.getElementById('editIsAbsent').checked,
-            place: document.getElementById('editPlace').value,
-            start: document.getElementById('editStart').value,
-            end: document.getElementById('editEnd').value
-        };
-        localStorage.setItem('workLogV12', JSON.stringify(currentData));
-        initCalendar(); closeModal(); showMsg("保存しました");
-    }
+            <button onclick="saveEdit()" class="btn-primary" style="padding:14px; border-radius:12px; margin-top:10px;">保存する</button>
+            <button onclick="deleteEntry()" class="btn-delete">この日のデータを削除</button>
+            <button onclick="closeModal()" class="btn-close">閉じる</button>
+        </div>
+    </div>
 
-    function toggleAbsent() {
-        const isA = document.getElementById('editIsAbsent').checked;
-        document.getElementById('timeInputs').style.opacity = isA ? "0.3" : "1.0";
-        if(isA && !document.getElementById('editPlace').value) document.getElementById('editPlace').value = "有給";
-    }
-
-    function copyForExcel() {
-        const year = viewDate.getFullYear();
-        const monthNum = viewDate.getMonth() + 1;
-        const lastDate = new Date(year, monthNum, 0).getDate();
-        let txt = "";
-
-        const stdS = timeToMin("9:00");
-        const stdE = timeToMin("17:30");
-        const lunchS = timeToMin("12:00");
-        const lunchE = timeToMin("13:00");
-
-        for (let d = 1; d <= lastDate; d++) {
-            const dateKey = `${year}-${String(monthNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-            const dayObj = new Date(year, monthNum - 1, d);
-            const dayOfWeek = ["日", "月", "火", "水", "木", "金", "土"][dayObj.getDay()];
-            const holName = getHolidayName(year, monthNum, d);
-            const data = currentData[dateKey] || {};
-
-            const type = (dayObj.getDay() === 0 || dayObj.getDay() === 6 || holName) ? "休日" : "平日";
-            const startStr = (!data.isAbsent && data.start) ? data.start : "";
-            const endStr = (!data.isAbsent && data.end) ? data.end : "";
-
-            let inTime = "0:00";
-            let outTime = "0:00";
-
-            if (startStr && endStr) {
-                const s = timeToMin(startStr);
-                const e = timeToMin(endStr);
-                
-                // 時間内計算 (9:00-17:30 休憩除く)
-                const inStart = Math.max(s, stdS);
-                const inEnd = Math.min(e, stdE);
-                if (inEnd > inStart) {
-                    let totalIn = inEnd - inStart;
-                    if (inStart < lunchE && inEnd > lunchS) {
-                        const overlap = Math.min(inEnd, lunchE) - Math.max(inStart, lunchS);
-                        totalIn -= overlap;
-                    }
-                    inTime = minToHStr(totalIn);
-                }
-
-                // 時間外計算 (総労働 - 時間内 - 休憩)
-                let totalWork = e - s;
-                if (s < lunchE && e > lunchS) {
-                    totalWork -= (Math.min(e, lunchE) - Math.max(s, lunchS));
-                }
-                outTime = minToHStr(totalWork - timeToMin(inTime));
-            }
-
-            txt += `${monthNum}/${d}\t${dayOfWeek}\t${type}\t${startStr}\t${endStr}\t${inTime}\t${outTime}\t0:00\t${(data.isAbsent && data.place==="有給")?"1":""}\t${(data.isAbsent && data.place!=="有給")?"1":""}\t\t${data.place||""}\n`;
-        }
-        copyToClipboard(txt);
-        alert(`${monthNum}月分（時間計算済）をコピーしました！Excelに貼り付けてください。`);
-    }
-
-    function copyToClipboard(text) {
-        const el = document.createElement('textarea'); el.value = text;
-        document.body.appendChild(el); el.select(); document.execCommand('copy');
-        document.body.removeChild(el);
-    }
-
-    function closeModal() { document.getElementById('editModal').style.display = 'none'; }
-    function showMsg(t) { document.getElementById('msg').innerText = t; setTimeout(()=>document.getElementById('msg').innerText="", 3000); }
-    function clearAll() { if(confirm("全消去しますか？")) { localStorage.removeItem('workLogV12'); location.reload(); } }
-
-    initCalendar();
-</script>
+    <!-- スクリプトの読み込み -->
+    <script src="script.js"></script>
 </body>
 </html>
