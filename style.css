@@ -115,39 +115,37 @@ button:active { opacity: 0.7; }
 .day.sat { background-color: var(--sat); }
 .day.sun, .day.holiday { background-color: var(--sun); }
 .day.today { border: 2px solid var(--primary); }
-.day-num { font-weight: bold; }
+.day-num { font-weight: bold; font-size: 11px; margin-bottom: 0; }
 
-/* 日付と祝日名のコンテナ */
-.day-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 2px;
-}
+/* 祝日名: 日付の下に独立行で表示 */
 .holiday-lbl {
-    font-size: 8px;
+    font-size: 7.5px;
     color: #c62828;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-weight: normal;
+    line-height: 1;
+    margin: 1px 0 2px 0;
+    width: 100%;
     /* モバイル用に幅制限を解除または調整 */
     max-width: none; 
 }
 
 /* カレンダー内の勤務記録ラベル */
 .entry { 
-    font-size: 8.5px; 
+    font-size: 8px; /* 少し小さく */
     margin-top: 1px; 
-    line-height: 1.1; 
-    padding: 1px 2px;
+    line-height: normal; 
+    padding: 1px 0; /* 横パディング極小 */
     border-radius: 3px;
     white-space: nowrap; 
     overflow: hidden; 
     font-weight: bold;
+    /* 記号と数字を並べて中央寄せ */
     display: flex;
+    justify-content: center;
     align-items: center;
-    gap: 1px;
+    gap: 1px; /* 記号との間隔を最小限に */
 }
 
 /* ボタンの色と同期させた背景色 */
