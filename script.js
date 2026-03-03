@@ -134,17 +134,18 @@ function initCalendar() {
         const info = currentData[key] || {}; 
         
         // 日付・祝日名のHTML生成
-        let dayHtml = `<div class="day-top"><span class="day-num">${d}</span>`;
+        // 祝日名は日付の隣ではなく下段に配置（モバイルで見切れ防止）
+        let layoutHtml = `<div class="day-num">${d}</div>`;
         if (isHoliday) {
-            dayHtml += `<span class="holiday-lbl">${holidayName}</span>`;
+            layoutHtml += `<div class="holiday-lbl">${holidayName}</div>`;
         }
-        dayHtml += `</div>`;
 
-        div.innerHTML = dayHtml;
+        div.innerHTML = layoutHtml;
         
         if (info.isAbsent) {
             div.innerHTML += `<div class="entry entry-absent">休暇</div>`;
         } else { 
+            // 記号を復活（省スペースのためスペースはなし）
             if (info.start) div.innerHTML += `<div class="entry entry-start">▶ ${info.start}</div>`; 
             if (info.end) div.innerHTML += `<div class="entry entry-end">■ ${info.end}</div>`; 
         }
