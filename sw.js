@@ -1,4 +1,6 @@
-const CACHE_NAME = 'daily-report-v1';
+const CACHE_VERSION = 'v1.02';
+const CACHE_NAME = `timesheet-v${CACHE_VERSION}`;
+
 const ASSETS_TO_CACHE = [
     './',
     './index.html',

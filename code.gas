@@ -1,0 +1,77 @@
+const APP_PASS = "passwd";
+
+function doGet(e) {
+  const p = e.parameter.p;
+  const user = e.parameter.u;
+  if (p !== APP_PASS || !user) return ContentService.createTextOutput("Forbidden");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(user);
+  if (!sheet) return ContentService.createTextOutput(JSON.stringify({})).setMimeType(ContentService.MimeType.JSON);
+
+  // 【重要】getDisplayValues() に変更：時刻を "09:00" のまま取得するため
+  const values = sheet.getDataRange().getDisplayValues(); 
+  const data = {};
+  
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    if (!row[0]) continue;
+    
+    // 日付の処理（シート上の表示が yyyy-MM-dd でない場合を考慮）
+    let dateKey = row[0].trim();
+    // もし日付が Date 型で認識されている場合に備えて補正
+    if (dateKey.includes('/')) dateKey = dateKey.replace(/\//g, '-'); 
+
+    data[dateKey] = { 
+      place: row[1] || "", 
+      start: row[2] || "", 
+      end: row[3] || "", 
+      isAbsent: (row[4] === "休暇") 
+    };
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  try {
+    const postData = JSON.parse(e.postData.contents);
+    if (postData.password !== APP_PASS) return;
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName(postData.user);
+    if (!sheet) {
+      sheet = ss.insertSheet(postData.user);
+      sheet.appendRow(["日付", "場所", "開始", "終了", "備考"]);
+    }
+
+    // doPost側も比較のために DisplayValues を使う
+    const values = sheet.getDataRange().getDisplayValues();
+    const targetDate = postData.date;
+    let rowIndex = -1;
+
+    for (let i = 1; i < values.length; i++) {
+      let sDate = values[i][0].replace(/\//g, '-').trim();
+      if (sDate === targetDate) { rowIndex = i + 1; break; }
+    }
+
+    if (postData.isDelete) {
+      if (rowIndex !== -1) sheet.deleteRow(rowIndex);
+    } else {
+      const newRow = [targetDate, postData.place || "", postData.start || "", postData.end || "", postData.isAbsent ? "休暇" : ""];
+      if (rowIndex !== -1) {
+        sheet.getRange(rowIndex, 1, 1, 5).setValues([newRow]);
+      } else {
+        sheet.appendRow(newRow);
+        if (sheet.getLastRow() > 1) {
+          sheet.getRange(2, 1, sheet.getLastRow() - 1, 5).sort({column: 1, ascending: true});
+        }
+      }
+    }
+    // JS側の fetch(no-cors) 対策として、一応レスポンスを返す
+    return ContentService.createTextOutput("ok");
+  } catch(err) {
+    console.error(err.toString());
+  }
+}

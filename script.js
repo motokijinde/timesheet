@@ -1,26 +1,58 @@
 // --- 設定 ---
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxBuj2t_H7eYgxydjzv-4BMIRBtdcspzBf-ulFw3v8A36QeE3P5CnHeghaX9HFjgo86qA/exec";
-const APP_PASS = "passwd";
 
-let currentData = {}, viewDate = new Date(), editingKey = null, currentUser = localStorage.getItem('work_user_name');let holidays = {}; // 祝日データキャッシュ
+let currentData = {}, viewDate = new Date(), editingKey = null;
+let currentUser = localStorage.getItem('work_user_name');
+let currentPass = localStorage.getItem('work_user_pass');
+let syncQueue = []; 
+let isQueueProcessing = false; // 排他制御フラグ
+
+// キューのロード
+try {
+    syncQueue = JSON.parse(localStorage.getItem('work_sync_queue')) || [];
+} catch(e) { syncQueue = []; }
+
+let holidays = {}; // 祝日データキャッシュ
 window.onload = () => { 
     if (currentUser) {
         document.getElementById('userNameInput').value = currentUser;
-        showApp(); 
+    }
+    if (currentPass) {
+        // パスワードが保存されていれば自動入力しておく
+        document.getElementById('passwordInput').value = currentPass;
+    }
+    
+    // 両方揃っていれば自動ログインを試みる
+    if (currentUser && currentPass) {
+        showApp();
     }
 };
 
+function saveQueue() {
+    localStorage.setItem('work_sync_queue', JSON.stringify(syncQueue));
+    initCalendar(); // アイコン更新
+}
+
 function login() {
     const name = document.getElementById('userNameInput').value.trim();
-    if (!name) return alert("ユーザー名を入力してください");
+    const pass = document.getElementById('passwordInput').value.trim();
+    
+    if (!name || !pass) return alert("ユーザー名とパスワードを入力してください");
+    
     currentUser = name;
+    currentPass = pass;
+    
+    // ローカルストレージに保存
     localStorage.setItem('work_user_name', name);
+    localStorage.setItem('work_user_pass', pass);
+    
     showApp();
 }
 
-function logout() {
-    if(!confirm("ログアウトしますか？")) return;
+function logout(confirmLogout = true) {
+    if(confirmLogout && !confirm("ログアウトしますか？")) return;
     localStorage.removeItem('work_user_name');
+    localStorage.removeItem('work_user_pass');
     location.reload();
 }
 
@@ -43,22 +75,69 @@ async function loadData() {
     try {
         // キャッシュ対策（cacheBuster）を追加
         const cacheBuster = `&t=${new Date().getTime()}`;
-        const res = await fetch(`${GAS_URL}?p=${APP_PASS}&u=${encodeURIComponent(currentUser)}${cacheBuster}`, { 
+        const res = await fetch(`${GAS_URL}?p=${encodeURIComponent(currentPass)}&u=${encodeURIComponent(currentUser)}${cacheBuster}`, { 
             method: 'GET', 
             redirect: 'follow' 
         });
-        currentData = await res.json();
+        
+        // テキストとして取得して判定
+        const text = await res.text();
+        
+        // エラー判定（GASが "Forbidden" を返す場合）
+        if (text.includes("Forbidden")) {
+            alert("ログインに失敗しました。\nパスワードが間違っているか、ユーザーが存在しません。");
+            document.getElementById('loader').style.display = 'none';
+            localStorage.removeItem('work_user_pass');
+            location.reload(); 
+            return;
+        }
+
+        try {
+            currentData = JSON.parse(text);
+
+            // ★未送信キューの内容をローカルデータに反映（最新のローカル変更を優先）
+            syncQueue.forEach(q => {
+                // 処理待ち・送信失敗の変更を適用
+                if (q.status !== 'pending' && q.status !== 'failed') return;
+                
+                const payload = q.payload;
+                if (payload.isDelete) {
+                    delete currentData[payload.date];
+                } else {
+                    const old = currentData[payload.date] || {};
+                    currentData[payload.date] = { ...old, ...payload };
+                }
+            });
+
+            // 正常に取得・マージできたらローカルストレージにも保存
+            localStorage.setItem('cached_work_data', JSON.stringify(currentData));
+        } catch (e) {
+            // JSONパースエラーの場合
+            console.error("データ形式エラー", text);
+            throw new Error("サーバーからの応答が不正です");
+        }
+        
         initCalendar();
     } catch (e) { 
         console.error("同期失敗", e);
+        
+        // オフラインまたはエラー時はキャッシュを表示
+        const cached = localStorage.getItem('cached_work_data');
+        if (cached) {
+            currentData = JSON.parse(cached);
+            alert("データの取得に失敗しました。\nオフライン用の過去データを表示します。");
+            initCalendar();
+        } else {
+            alert("データの取得に失敗しました: " + e.message);
+        }
     }
     document.getElementById('loader').style.display = 'none';
 }
 
 // 祝日データの取得処理
 async function fetchHolidays(year) {
-    if (holidays[year] || holidays[`fethed_${year}`]) return;
-    holidays[`fethed_${year}`] = true;
+    if (holidays[year] || holidays[`fetched_${year}`]) return;
+    holidays[`fetched_${year}`] = true;
     
     try {
         const res = await fetch(`https://holidays-jp.github.io/api/v1/${year}/date.json`);
@@ -73,40 +152,96 @@ async function fetchHolidays(year) {
     }
 }
 
-// GASへデータを送信
+// サーバーへデータ送信＆同期
 async function syncToGAS(payload) {
-    document.getElementById('loader').style.display = 'flex';
-
-    // 1. 楽観的UI更新（消えるのを防ぐために手元データを即更新）
+// 1. ローカルデータを即時更新（楽観的UI）
     if (payload.isDelete) {
         delete currentData[payload.date];
     } else {
-        currentData[payload.date] = { ...payload };
+        // 現在のデータと結合（placeだけ更新などで消えないように）
+        const old = currentData[payload.date] || {};
+        currentData[payload.date] = { ...old, ...payload };
     }
-    initCalendar();
+    localStorage.setItem('cached_work_data', JSON.stringify(currentData));
+    
+    // 2. キューに追加
+    // 同じ日付への未処理リクエストがあれば削除（最新の上書きでOKとする）
+    syncQueue = syncQueue.filter(q => q.date !== payload.date);
+    
+    syncQueue.push({
+        id: Date.now(),
+        date: payload.date,
+        payload: payload,
+        status: 'pending'
+    });
+    saveQueue();
+
+    // 3. 送信処理開始（待たない）
+    processQueue();
+}
+
+// キュー処理
+async function processQueue() {
+    if (isQueueProcessing) return; // 実行中なら抜ける
+    isQueueProcessing = true;
 
     try {
-        // 2. 確実に飛ばすための no-cors モード
-        await fetch(GAS_URL, {
-            method: "POST",
-            mode: "no-cors", 
-            header: { "Content-Type": "text/plain" },
-            body: JSON.stringify({ ...payload, password: APP_PASS, user: currentUser })
-        });
+        let pendings;
+        // 未処理がある限りループし続ける
+        while ((pendings = syncQueue.filter(q => q.status === 'pending')).length > 0) {
+            
+            // 1つずつ処理（並列にするとGASが詰まる可能性があるので直列）
+            const item = pendings[0];
+            
+            try {
+                await fetch(GAS_URL, {
+                    method: "POST",
+                    mode: "no-cors", 
+                    header: { "Content-Type": "text/plain" },
+                    body: JSON.stringify({ ...item.payload, password: currentPass, user: currentUser })
+                });
 
-        // 3. GASの処理時間を待ってから再取得
-        setTimeout(loadData, 2000); 
-    } catch (e) { 
-        alert("通信エラーが発生しました"); 
-        loadData(); // 失敗時は元に戻す
+                // 成功したら削除
+                syncQueue = syncQueue.filter(q => q.id !== item.id);
+                saveQueue();
+                initCalendar(); // アイコン更新
+            } catch (e) {
+                console.error("Queue Failed", e);
+                // 失敗ステータスへ
+                const target = syncQueue.find(q => q.id === item.id);
+                if(target) target.status = 'failed';
+                saveQueue();
+                initCalendar(); // アイコン更新 (⚠️になる)
+                
+                // エラー時は一旦抜けて、次のトリガー(再送信など)を待つのが安全だが
+                // 次のアイテムと関連がないなら続けてもいい。
+                // ここでは安全のためループを抜ける（キュー詰まり防止で失敗アイテム以外は進めたい場合はcontinue）
+                // 今回は「失敗したら止める」挙動の方が整合性がとりやすい
+                break; 
+            }
+        }
+    } finally {
+        isQueueProcessing = false;
     }
+}
+
+// 再送信（手動）
+async function retrySync(id) {
+    const item = syncQueue.find(q => q.id === id);
+    if (!item) return;
+    
+    // ステータスをpendingに戻して再実行
+    item.status = 'pending';
+    saveQueue();
+    initCalendar(); // ⏳アイコンへ戻す
+    processQueue();
 }
 
 function initCalendar() {
     const year = viewDate.getFullYear(), month = viewDate.getMonth(), todayStr = new Date().toLocaleDateString('sv-SE');
     
     // 祝日データ取得開始（未取得の場合）
-    if (!holidays[`fethed_${year}`]) fetchHolidays(year);
+    if (!holidays[`fetched_${year}`]) fetchHolidays(year);
 
     document.getElementById('monthDisplay').innerText = `${year}年 ${month + 1}月`;
     const calEl = document.getElementById('calendar'); calEl.innerHTML = '';
@@ -139,12 +274,25 @@ function initCalendar() {
         if (isHoliday) {
             layoutHtml += `<div class="holiday-lbl">${holidayName}</div>`;
         }
+        
+        // --- 同期ステータスアイコン ---
+        const qItem = syncQueue.find(q => q.date === key);
+        if (qItem) {
+            if (qItem.status === 'pending') {
+                layoutHtml += `<div class="sync-icon sync-pending">⌛</div>`;
+            } else if (qItem.status === 'failed') {
+                layoutHtml += `<div class="sync-icon sync-failed" onclick="event.stopPropagation(); retrySync(${qItem.id});">⚠️</div>`;
+            }
+        }
 
         div.innerHTML = layoutHtml;
         
         if (info.isAbsent) {
             div.innerHTML += `<div class="entry entry-absent">休暇</div>`;
         } else { 
+            // 場所があれば表示
+            if (info.place) div.innerHTML += `<div class="entry entry-place">${info.place}</div>`;
+
             // 記号を復活（省スペースのためスペースはなし）
             if (info.start) div.innerHTML += `<div class="entry entry-start">▶ ${info.start}</div>`; 
             if (info.end) div.innerHTML += `<div class="entry entry-end">■ ${info.end}</div>`; 
@@ -170,18 +318,20 @@ function quickLog(type, place = "") {
             if (m === 60) { h++; m = 0; }
         }
         timeStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        const clipTimeStr = `${h}:${String(m).padStart(2,'0')}`; // Teams用: ゼロ埋めなし(9:00)
         data.start = timeStr; 
         data.place = place; 
         data.isAbsent = false;
         
-        clipText = `作業開始　${place}　${timeStr}`;
+        clipText = `作業開始　${place}　${clipTimeStr}`;
     } else {
         // 終了時: 10分単位で切り捨て
         m = Math.floor(m / 10) * 10;
         timeStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        const clipTimeStr = `${h}:${String(m).padStart(2,'0')}`; // Teams用: ゼロ埋めなし(18:00)
         data.end = timeStr;
         
-        clipText = `作業終了　${timeStr}`;
+        clipText = `作業終了　${clipTimeStr}`;
     }
 
     // クリップボードへコピー＆記録
