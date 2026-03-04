@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v1.02';
+const CACHE_VERSION = 'v1.03';
 const CACHE_NAME = `timesheet-v${CACHE_VERSION}`;
 
 const ASSETS_TO_CACHE = [
