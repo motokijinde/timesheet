@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v1.03';
+const CACHE_VERSION = 'v1.04';
 const CACHE_NAME = `timesheet-v${CACHE_VERSION}`;
 
 const ASSETS_TO_CACHE = [
@@ -6,7 +6,8 @@ const ASSETS_TO_CACHE = [
     './index.html',
     './style.css',
     './script.js',
-    './manifest.json'
+    './manifest.json',
+    './icon.png'
 ];
 
 // インストール処理
@@ -14,6 +15,7 @@ self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then((cache) => cache.addAll(ASSETS_TO_CACHE))
+            .then(() => self.skipWaiting())
     );
 });
 
@@ -29,11 +31,24 @@ self.addEventListener('activate', (event) => {
                 })
             );
         })
+        .then(() => self.clients.claim())
     );
 });
 
 // フェッチ処理
 self.addEventListener('fetch', (event) => {
+    // GASのAPIリクエストはキャッシュしない
+    if (event.request.url.includes('script.google.com/macros')) {
+        event.respondWith(
+            fetch(event.request).catch(() => {
+                // オフライン時は空のResponseを返す
+                return new Response('', { status: 503, statusText: 'Service Unavailable' });
+            })
+        );
+        return;
+    }
+
+    // その他のリクエストはキャッシュ優先
     event.respondWith(
         caches.match(event.request)
             .then((response) => {

@@ -1,19 +1,70 @@
 // --- 設定 ---
-const GAS_URL = "https://script.google.com/macros/s/AKfycbxBuj2t_H7eYgxydjzv-4BMIRBtdcspzBf-ulFw3v8A36QeE3P5CnHeghaX9HFjgo86qA/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycby2iRDr_4PABeo5AHDTWFh9PiVgvGSJCIlhu9qwLwgUGMurOL800B8WcwNlpSzmIsLEfA/exec";
+const OFFLINE_TIMEOUT = 5000; // オフライン判定タイムアウト(ms)
+const MAX_RETRY_ATTEMPTS = 3; // 最大リトライ回数
+const RETRY_DELAY = 2000; // リトライ間隔(ms)
 
 let currentData = {}, viewDate = new Date(), editingKey = null;
 let currentUser = localStorage.getItem('work_user_name');
 let currentPass = localStorage.getItem('work_user_pass');
 let syncQueue = []; 
 let isQueueProcessing = false; // 排他制御フラグ
+let isOnline = navigator.onLine; // オンライン状態フラグ
 
 // キューのロード
 try {
     syncQueue = JSON.parse(localStorage.getItem('work_sync_queue')) || [];
 } catch(e) { syncQueue = []; }
 
-let holidays = {}; // 祝日データキャッシュ
-window.onload = () => { 
+// オンライン/オフライン状態の監視
+window.addEventListener('online', () => {
+    isOnline = true;
+    console.log('Online detected');
+    // オンラインになったらキューを処理
+    processQueue();
+    // オンライン通知を表示
+    showOnlineIndicator();
+});
+
+window.addEventListener('offline', () => {
+    isOnline = false;
+    console.log('Offline detected');
+    // オフライン通知を表示
+    showOfflineIndicator();
+});
+
+// オフライン/オンライン状態のインジケータ表示
+function showOfflineIndicator() {
+    const indicator = document.getElementById('offline-indicator');
+    if (!indicator) {
+        const el = document.createElement('div');
+        el.id = 'offline-indicator';
+        el.className = 'offline-indicator';
+        el.innerText = 'オフライン: データはローカルで保存され、オンライン時に同期されます';
+        document.body.appendChild(el);
+    } else {
+        indicator.style.display = 'block';
+    }
+}
+
+function showOnlineIndicator() {
+    const indicator = document.getElementById('online-indicator');
+    if (!indicator) {
+        const el = document.createElement('div');
+        el.id = 'online-indicator';
+        el.className = 'online-indicator';
+        el.innerText = 'オンライン: データを同期しています';
+        document.body.appendChild(el);
+    } else {
+        indicator.style.display = 'block';
+        // 2秒後にフェードアウト
+        setTimeout(() => {
+            indicator.style.display = 'none';
+        }, 2000);
+    }
+}
+
+window.onload = () => {
     if (currentUser) {
         document.getElementById('userNameInput').value = currentUser;
     }
@@ -72,13 +123,43 @@ function showApp() {
 // サーバーから最新データを取得
 async function loadData() {
     document.getElementById('loader').style.display = 'flex';
+    
+    // オフライン状態の場合はキャッシュから読み込む
+    if (!isOnline) {
+        const cached = localStorage.getItem('cached_work_data');
+        if (cached) {
+            currentData = JSON.parse(cached);
+            // キューの内容を反映
+            syncQueue.forEach(q => {
+                if (q.status !== 'pending' && q.status !== 'failed') return;
+                const payload = q.payload;
+                if (payload.isDelete) {
+                    delete currentData[payload.date];
+                } else {
+                    const old = currentData[payload.date] || {};
+                    currentData[payload.date] = { ...old, ...payload };
+                }
+            });
+            initCalendar();
+            document.getElementById('loader').style.display = 'none';
+            return;
+        }
+    }
+    
     try {
-        // キャッシュ対策（cacheBuster）を追加
+        // キャッシュ対策（cacheBuster）と年パラメータを追加
+        const year = viewDate.getFullYear();
         const cacheBuster = `&t=${new Date().getTime()}`;
-        const res = await fetch(`${GAS_URL}?p=${encodeURIComponent(currentPass)}&u=${encodeURIComponent(currentUser)}${cacheBuster}`, { 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), OFFLINE_TIMEOUT);
+        
+        const res = await fetch(`${GAS_URL}?p=${encodeURIComponent(currentPass)}&u=${encodeURIComponent(currentUser)}&year=${year}${cacheBuster}`, {
             method: 'GET', 
-            redirect: 'follow' 
+            redirect: 'follow',
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
         
         // テキストとして取得して判定
         const text = await res.text();
@@ -134,33 +215,52 @@ async function loadData() {
     document.getElementById('loader').style.display = 'none';
 }
 
-// 祝日データの取得処理
-async function fetchHolidays(year) {
-    if (holidays[year] || holidays[`fetched_${year}`]) return;
-    holidays[`fetched_${year}`] = true;
-    
-    try {
-        const res = await fetch(`https://holidays-jp.github.io/api/v1/${year}/date.json`);
-        if (res.ok) {
-            const data = await res.json();
-            holidays[year] = data;
-            // 該当年の表示中なら再描画
-            if (viewDate.getFullYear() === year) initCalendar();
-        }
-    } catch (e) {
-        console.error("祝日データ取得失敗", e);
-    }
-}
 
 // サーバーへデータ送信＆同期
 async function syncToGAS(payload) {
 // 1. ローカルデータを即時更新（楽観的UI）
     if (payload.isDelete) {
-        delete currentData[payload.date];
+        // 勤怠データのみ削除、祝日情報は保持
+        const old = currentData[payload.date] || {};
+        if (old.isHoliday) {
+            // 祝日の場合は勤怠情報のみクリア
+            currentData[payload.date] = {
+                place: "",
+                start: "",
+                end: "",
+                vacationType: "",
+                isAbsent: false,
+                isHalfDay: false,
+                isHoliday: old.isHoliday,
+                holidayName: old.holidayName,
+                absenceReason: ""
+            };
+        } else {
+            // 祝日でない場合は完全削除
+            delete currentData[payload.date];
+        }
     } else {
         // 現在のデータと結合（placeだけ更新などで消えないように）
         const old = currentData[payload.date] || {};
-        currentData[payload.date] = { ...old, ...payload };
+        
+        // vacationTypeを計算してローカルデータに反映
+        let vacationType = "";
+        if (payload.isAbsent) {
+            vacationType = payload.place || "有給休暇";
+        } else if (payload.isHalfDay) {
+            if (payload.halfDayType === "morning") {
+                vacationType = "午前半休";
+            } else if (payload.halfDayType === "afternoon") {
+                vacationType = "午後半休";
+            }
+        }
+        
+        currentData[payload.date] = { 
+            ...old, 
+            ...payload,
+            vacationType: vacationType,
+            absenceReason: vacationType || old.absenceReason
+        };
     }
     localStorage.setItem('cached_work_data', JSON.stringify(currentData));
     
@@ -194,12 +294,35 @@ async function processQueue() {
             const item = pendings[0];
             
             try {
+                // オフライン状態の場合はリトライを設定して待機
+                if (!isOnline) {
+                    // オフライン時はリトライ回数を増やす
+                    item.retryCount = (item.retryCount || 0) + 1;
+                    if (item.retryCount <= MAX_RETRY_ATTEMPTS) {
+                        setTimeout(() => {
+                            processQueue();
+                        }, RETRY_DELAY * item.retryCount);
+                    } else {
+                        item.status = 'failed';
+                        saveQueue();
+                        initCalendar();
+                    }
+                    break;
+                }
+                
+                // オンライン時は通常の送信処理
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), OFFLINE_TIMEOUT);
+                
                 await fetch(GAS_URL, {
                     method: "POST",
                     mode: "no-cors", 
                     header: { "Content-Type": "text/plain" },
-                    body: JSON.stringify({ ...item.payload, password: currentPass, user: currentUser })
+                    body: JSON.stringify({ ...item.payload, password: currentPass, user: currentUser }),
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
 
                 // 成功したら削除
                 syncQueue = syncQueue.filter(q => q.id !== item.id);
@@ -209,7 +332,10 @@ async function processQueue() {
                 console.error("Queue Failed", e);
                 // 失敗ステータスへ
                 const target = syncQueue.find(q => q.id === item.id);
-                if(target) target.status = 'failed';
+                if(target) {
+                    target.status = 'failed';
+                    target.retryCount = (target.retryCount || 0) + 1;
+                }
                 saveQueue();
                 initCalendar(); // アイコン更新 (⚠️になる)
                 
@@ -239,9 +365,6 @@ async function retrySync(id) {
 
 function initCalendar() {
     const year = viewDate.getFullYear(), month = viewDate.getMonth(), todayStr = new Date().toLocaleDateString('sv-SE');
-    
-    // 祝日データ取得開始（未取得の場合）
-    if (!holidays[`fetched_${year}`]) fetchHolidays(year);
 
     document.getElementById('monthDisplay').innerText = `${year}年 ${month + 1}月`;
     const calEl = document.getElementById('calendar'); calEl.innerHTML = '';
@@ -253,20 +376,18 @@ function initCalendar() {
 
     const first = new Date(year, month, 1).getDay(), last = new Date(year, month + 1, 0).getDate();
     for (let i = 0; i < first; i++) calEl.appendChild(document.createElement('div'));
-    
-    const yearHolidays = holidays[year] || {}; // 祝日データ
 
     for (let d = 1; d <= last; d++) {
         const key = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`, div = document.createElement('div'), dow = new Date(year, month, d).getDay();
         
-        // 祝日の判定
-        const holidayName = yearHolidays[key];
-        const isHoliday = !!holidayName;
-
-        div.className = `day ${dow===6?'sat':dow===0 || isHoliday ?'sun':''}`; 
-        if (key === todayStr) div.classList.add('today');
+        const info = currentData[key] || {};
         
-        const info = currentData[key] || {}; 
+        // サーバーから取得した祝日情報を使用
+        const holidayName = info.holidayName || "";
+        const isHoliday = info.isHoliday || false;
+
+        div.className = `day ${dow===6?'sat':dow===0 || isHoliday ?'sun':''}`;
+        if (key === todayStr) div.classList.add('today');
         
         // 日付・祝日名のHTML生成
         // 祝日名は日付の隣ではなく下段に配置（モバイルで見切れ防止）
@@ -288,15 +409,26 @@ function initCalendar() {
         div.innerHTML = layoutHtml;
         
         if (info.isAbsent) {
-            div.innerHTML += `<div class="entry entry-absent">休暇</div>`;
-        } else { 
-            // 場所があれば表示
+            // 欠勤・休暇の理由を表示
+            const reason = info.absenceReason || info.place || "休暇";
+            div.innerHTML += `<div class="entry entry-absent">${reason}</div>`;
+        } else if (info.isHalfDay) {
+            // 半休の表示（午前休/午後休を表示）
+            const halfDayLabel = info.vacationType === "午前半休" ? "午前休" : 
+                                 info.vacationType === "午後半休" ? "午後休" : "半休";
+            div.innerHTML += `<div class="entry entry-halfday">${halfDayLabel}</div>`;
+            
+            // 半休でも場所と時間を表示
             if (info.place) div.innerHTML += `<div class="entry entry-place">${info.place}</div>`;
-
-            // 記号を復活（省スペースのためスペースはなし）
+            if (info.start) div.innerHTML += `<div class="entry entry-start">▶ ${info.start}</div>`; 
+            if (info.end) div.innerHTML += `<div class="entry entry-end">■ ${info.end}</div>`;
+        } else if (info.place || info.start || info.end) { 
+            // 通常勤務（場所または時間がある場合）
+            if (info.place) div.innerHTML += `<div class="entry entry-place">${info.place}</div>`;
             if (info.start) div.innerHTML += `<div class="entry entry-start">▶ ${info.start}</div>`; 
             if (info.end) div.innerHTML += `<div class="entry entry-end">■ ${info.end}</div>`; 
         }
+        // 祝日のみの場合は何も表示しない（祝日名と背景色のみ）
         div.onclick = () => openEdit(key); calEl.appendChild(div);
     }
 }
@@ -305,7 +437,7 @@ function quickLog(type, place = "") {
     const now = new Date();
     // 日付キー生成 YYYY-MM-DD
     const dateKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-    let data = currentData[dateKey] || { start: "", end: "", place: "", isAbsent: false };
+    let data = currentData[dateKey] || { start: "", end: "", place: "", isAbsent: false, isHalfDay: false };
     
     let h = now.getHours(), m = now.getMinutes();
     let timeStr = "", clipText = "";
@@ -322,6 +454,8 @@ function quickLog(type, place = "") {
         data.start = timeStr; 
         data.place = place; 
         data.isAbsent = false;
+        data.isHalfDay = false;
+        data.halfDayType = "";
         
         clipText = `作業開始　${place}　${clipTimeStr}`;
     } else {
@@ -347,10 +481,47 @@ function quickLog(type, place = "") {
 }
 
 function openEdit(key) {
-    editingKey = key; const info = currentData[key] || { start: "", end: "", place: "", isAbsent: false };
-    document.getElementById('editDateLabel').innerText = key; 
-    document.getElementById('editIsAbsent').checked = info.isAbsent;
-    document.getElementById('editPlace').value = info.place || ""; 
+    editingKey = key;
+    const info = currentData[key] || { 
+        start: "", end: "", place: "", 
+        vacationType: "", isAbsent: false, isHalfDay: false 
+    };
+    
+    document.getElementById('editDateLabel').innerText = key;
+    
+    // 休暇種別から状態を復元
+    const vacationType = info.vacationType || "";
+    
+    const placeInput = document.getElementById('editPlace');
+    
+    if (vacationType === "午前半休" || vacationType === "午後半休") {
+        // 半休の場合
+        document.getElementById('editIsHalfDay').checked = true;
+        document.getElementById('editIsAbsent').checked = false;
+        placeInput.value = info.place || "";
+        placeInput.setAttribute('list', 'places');
+        
+        // 午前/午後の選択を復元
+        if (vacationType === "午前半休") {
+            document.getElementById('halfDayMorning').checked = true;
+            document.getElementById('halfDayAfternoon').checked = false;
+        } else {
+            document.getElementById('halfDayMorning').checked = false;
+            document.getElementById('halfDayAfternoon').checked = true;
+        }
+    } else if (vacationType && info.isAbsent) {
+        // 全日休暇の場合
+        document.getElementById('editIsAbsent').checked = true;
+        document.getElementById('editIsHalfDay').checked = false;
+        placeInput.value = vacationType; // 休暇種別を表示
+        placeInput.setAttribute('list', 'absenceReasons');
+    } else {
+        // 通常勤務の場合
+        document.getElementById('editIsAbsent').checked = false;
+        document.getElementById('editIsHalfDay').checked = false;
+        placeInput.value = info.place || "";
+        placeInput.setAttribute('list', 'places');
+    }
     
     // input type="time" 用に HH:mm 形式へ整形
     const formatTime = (t) => {
@@ -362,20 +533,87 @@ function openEdit(key) {
 
     document.getElementById('editStart').value = formatTime(info.start); 
     document.getElementById('editEnd').value = formatTime(info.end);
+    
     toggleAbsent(); 
+    toggleHalfDay();
     document.getElementById('editModal').style.display = 'flex';
 }
 
 function toggleAbsent() {
     const is = document.getElementById('editIsAbsent').checked;
+    const isHalf = document.getElementById('editIsHalfDay').checked;
+    const placeInput = document.getElementById('editPlace');
+    
     document.getElementById('timeInputs').style.opacity = is ? "0.3" : "1";
     document.getElementById('timeInputs').style.pointerEvents = is ? "none" : "auto";
+    
+    // 欠勤・休暇のチェックが変わったらdatalistを切り替える
+    if (is) {
+        // 欠勤・休暇時は理由の候補を表示
+        placeInput.setAttribute('list', 'absenceReasons');
+        
+        // 時間と場所をクリア
+        document.getElementById('editStart').value = "";
+        document.getElementById('editEnd').value = "";
+        placeInput.value = "";
+        
+        // 欠勤・休暇がチェックされたら半休を外す
+        if (isHalf) {
+            document.getElementById('editIsHalfDay').checked = false;
+            toggleHalfDay();
+        }
+    } else {
+        // 通常時は場所の候補を表示
+        placeInput.setAttribute('list', 'places');
+    }
+}
+
+function toggleHalfDay() {
+    const isHalf = document.getElementById('editIsHalfDay').checked;
+    const isAbsent = document.getElementById('editIsAbsent').checked;
+    const halfDayOptions = document.getElementById('halfDayOptions');
+    
+    // 半休がチェックされたら欠勤・休暇を外す
+    if (isHalf && isAbsent) {
+        document.getElementById('editIsAbsent').checked = false;
+        toggleAbsent();
+    }
+    
+    // 半休オプションの表示/非表示
+    if (isHalf) {
+        halfDayOptions.style.display = 'block';
+        // デフォルトで午前休を選択（時間は自動入力しない）
+        if (!document.getElementById('halfDayMorning').checked && !document.getElementById('halfDayAfternoon').checked) {
+            document.getElementById('halfDayMorning').checked = true;
+        }
+    } else {
+        halfDayOptions.style.display = 'none';
+        document.getElementById('halfDayMorning').checked = false;
+        document.getElementById('halfDayAfternoon').checked = false;
+    }
+    
+    // 半休時は時間入力を有効にする
+    document.getElementById('timeInputs').style.opacity = "1";
+    document.getElementById('timeInputs').style.pointerEvents = "auto";
 }
 
 function saveEdit() {
+    const isHalfDay = document.getElementById('editIsHalfDay').checked;
+    let halfDayType = "";
+    
+    if (isHalfDay) {
+        if (document.getElementById('halfDayMorning').checked) {
+            halfDayType = "morning";
+        } else if (document.getElementById('halfDayAfternoon').checked) {
+            halfDayType = "afternoon";
+        }
+    }
+    
     syncToGAS({ 
         date: editingKey, 
         isAbsent: document.getElementById('editIsAbsent').checked, 
+        isHalfDay: isHalfDay,
+        halfDayType: halfDayType,
         place: document.getElementById('editPlace').value, 
         start: document.getElementById('editStart').value, 
         end: document.getElementById('editEnd').value 
@@ -402,6 +640,7 @@ function copyForExcel() {
     }
     navigator.clipboard.writeText(txt).then(() => alert("コピーしました"));
 }
+
 
 // --- Service Worker の登録 ---
 if ('serviceWorker' in navigator) {

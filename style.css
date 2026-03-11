@@ -1,15 +1,27 @@
+/* =================================
+   CSS変数定義
+   ================================= */
 :root { 
-    --primary: #464eb8; 
-    --start: #e3f2fd; /* 出勤ボタン背景（薄い青） */
+    --primary: #464eb8;   /* プライマリカラー（メインボタン・見出し） */
+    --start: #e3f2fd;     /* 出勤ボタン背景（薄い青） */
     --start-text: #1976d2; /* 出勤テキスト色 */
-    --end: #fff3e0;   /* 退勤ボタン背景（薄いオレンジ） */
-    --end-text: #f57c00;   /* 退勤テキスト色 */
-    --bg: #f8f9fa; 
-    --sat: #e8f4ff; 
-    --sun: #ffebee; 
+    --end: #fff3e0;       /* 退勤ボタン背景（薄いオレンジ） */
+    --end-text: #f57c00;  /* 退勤テキスト色 */
+    --bg: #f8f9fa;        /* 背景色（全体のベース） */
+    --sat: #e8f4ff;       /* 土曜日の背景色（薄い青） */
+    --sun: #ffebee;       /* 日曜日・祝日の背景色（薄い赤） */
+    
+    /* z-index階層定義 */
+    --z-calendar-icon: 5;
+    --z-modal: 1000;
+    --z-notification: 1001;
+    --z-loading: 2000;
 }
 
-body { 
+/* =================================
+   基本レイアウト
+   ================================= */
+body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
     background: var(--bg); 
     display: flex; 
@@ -19,6 +31,7 @@ body {
     margin: 0; 
 }
 
+/* ログイン画面とメインアプリ画面の共通スタイル */
 #loginArea, .container { 
     background: white; 
     padding: 20px; 
@@ -32,7 +45,10 @@ body {
     margin: 0 auto; 
 }
 
+/* ログイン画面エリア */
 #loginArea { display: block; text-align: center; margin-top: 50px; max-width: 350px; }
+
+/* メインアプリケーション画面（ログイン後に表示） */
 .container { display: none; }
 
 h2 { color: var(--primary); text-align: center; font-size: 22px; margin: 10px 0 20px 0; /* 少し下マージン追加 */ }
@@ -65,7 +81,11 @@ h2 { color: var(--primary); text-align: center; font-size: 22px; margin: 10px 0 
     height: 14px;
 }
 
-/* --- 操作ボタン --- */
+/* =================================
+   ボタン類
+   ================================= */
+
+/* ログアウトボタン */
 .btn-logout-text {
     background: transparent;
     border: none;
@@ -81,8 +101,10 @@ h2 { color: var(--primary); text-align: center; font-size: 22px; margin: 10px 0 
     background: #fff5f5;
 }
 
-/* --- 操作ボタン --- */
+/* ボタングループ（出社・在宅・終了） */
 .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+
+/* 全ボタン共通スタイル */
 button { padding: 14px; border-radius: 12px; border: 1px solid #eee; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
 button:active { opacity: 0.7; }
 
@@ -95,6 +117,7 @@ button:active { opacity: 0.7; }
 .nav-btn { background: #f0f0f0; border: none; padding: 8px 15px; border-radius: 8px; font-size: 12px; }
 #monthDisplay { font-weight: 700; font-size: 17px; }
 
+/* カレンダーグリッド（7列：日曜～土曜） */
 .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .day-header { font-size: 11px; font-weight: bold; color: #aaa; text-align: center; padding-bottom: 5px; }
 
@@ -110,6 +133,24 @@ button:active { opacity: 0.7; }
     flex-direction: column; 
     transition: background 0.2s;
     overflow: hidden;
+}
+
+/* 古いブラウザ用のフォールバック（aspect-ratio非対応時） */
+@supports not (aspect-ratio: 1/1.4) {
+    .day {
+        position: relative;
+        width: 100%;
+        padding-bottom: 140%; /* 1:1.4の比率 */
+        padding: 0; /* paddingをリセット */
+    }
+    
+    .day > * {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        right: 2px;
+        bottom: 2px;
+    }
 }
 .day:hover { background-color: #fafafa; }
 .day.sat { background-color: var(--sat); }
@@ -152,9 +193,25 @@ button:active { opacity: 0.7; }
 .entry-start { background-color: var(--start); color: var(--start-text); }
 .entry-end { background-color: var(--end); color: var(--end-text); }
 .entry-absent { background-color: var(--sun); color: #d32f2f; justify-content: center; font-size: 8px; }
+.entry-holiday { background-color: #fff3e0; color: #f57c00; justify-content: center; font-size: 8px; }
+.entry-halfday { background-color: #fff3e0; color: #ff9800; justify-content: center; font-size: 8px; }
 
 /* --- モーダル --- */
-.modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); align-items: center; justify-content: center; z-index: 1000; }
+.modal { 
+    display: none; 
+    position: fixed; 
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    inset: 0; /* モダンブラウザ用の省略記法 */
+    background: rgba(0,0,0,0.5); 
+    backdrop-filter: blur(4px); 
+    -webkit-backdrop-filter: blur(4px); /* Safari用 */
+    align-items: center; 
+    justify-content: center; 
+    z-index: var(--z-modal); 
+}
 /* 横幅を少し広げて(max-width: 380px)、ゆとりを持たせる */
 .modal-content { background: white; padding: 25px; border-radius: 24px; width: 90%; max-width: 380px; box-sizing: border-box; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
 .form-item { margin-bottom: 15px; }
@@ -176,7 +233,21 @@ button:active { opacity: 0.7; }
 .copy-btn { width: 100%; background: var(--primary); color: white; padding: 16px; border-radius: 14px; border: none; font-size: 16px; font-weight: bold; transition: transform 0.1s; }
 .copy-btn:active { transform: scale(0.98); }
 
-.loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.7); display: none; align-items: center; justify-content: center; z-index: 2000; font-weight: bold; color: var(--primary); }
+.loading-overlay { 
+    position: fixed; 
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    inset: 0; /* モダンブラウザ用の省略記法 */
+    background: rgba(255,255,255,0.7); 
+    display: none; 
+    align-items: center; 
+    justify-content: center; 
+    z-index: var(--z-loading); 
+    font-weight: bold; 
+    color: var(--primary); 
+}
 
 #loginArea input {
     width: 100%;
@@ -188,21 +259,82 @@ button:active { opacity: 0.7; }
     margin-bottom: 10px;
 }
 
-/* --- �����X�e�[�^�X & �ꏊ --- */
+/* --- 同期ステータスアイコン --- */
 .sync-icon {
     position: absolute;
     top: 2px;
     right: 2px;
     font-size: 10px;
-    z-index: 5;
+    z-index: var(--z-calendar-icon);
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 50%;
+    padding: 1px;
+    border: 1px solid #ddd;
 }
 .sync-pending { opacity: 0.7; animation: spin 2s infinite linear; }
-.sync-failed { opacity: 1; color: red; cursor: pointer; }
+.sync-failed { opacity: 1; color: #d32f2f; cursor: pointer; background: rgba(244, 67, 54, 0.1); }
 
-@keyframes spin { 100% { transform: rotate(360deg); } }
+/* 同期中アイコンの回転アニメーション */
+@keyframes spin { 
+    100% { transform: rotate(360deg); } 
+}
+
+/* オンライン通知のフェードアウトアニメーション */
+@keyframes fadeOut {
+    0% { 
+        opacity: 1; 
+        visibility: visible; 
+    }
+    99% { 
+        opacity: 0; 
+        visibility: visible; 
+    }
+    100% { 
+        opacity: 0; 
+        visibility: hidden; 
+    }
+}
 
 .entry-place {
     background-color: transparent;
     color: #333;
     font-weight: normal;
+}
+
+/* オフライン状態の視覚的フィードバック */
+.offline-indicator {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    inset: 0; /* モダンブラウザ用の省略記法 */
+    top: 0;
+    bottom: auto; /* insetを上書きして上部のみ固定 */
+    background: #f44336;
+    color: white;
+    text-align: center;
+    padding: 8px;
+    font-size: 12px;
+    z-index: var(--z-notification);
+    display: none;
+}
+
+.online-indicator {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    inset: 0; /* モダンブラウザ用の省略記法 */
+    top: 0;
+    bottom: auto; /* insetを上書きして上部のみ固定 */
+    background: #4caf50;
+    color: white;
+    text-align: center;
+    padding: 8px;
+    font-size: 12px;
+    z-index: var(--z-notification);
+    display: none;
+    animation: fadeOut 2s forwards;
 }

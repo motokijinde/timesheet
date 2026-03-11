@@ -72,6 +72,16 @@
                 <input type="checkbox" id="editIsAbsent" onchange="toggleAbsent()"> 
                 <label for="editIsAbsent">欠勤 / 休暇</label>
             </div>
+            <div class="form-item row">
+                <input type="checkbox" id="editIsHalfDay" onchange="toggleHalfDay()"> 
+                <label for="editIsHalfDay">半休</label>
+            </div>
+            <div class="form-item row" id="halfDayOptions" style="display:none; margin-left:20px;">
+                <input type="radio" id="halfDayMorning" name="halfDayType" value="morning">
+                <label for="halfDayMorning">午前休</label>
+                <input type="radio" id="halfDayAfternoon" name="halfDayType" value="afternoon" style="margin-left:15px;">
+                <label for="halfDayAfternoon">午後休</label>
+            </div>
 
             <div class="form-item">
                 <label class="lbl">勤務場所 または 理由</label>
@@ -80,9 +90,14 @@
                     <option value="出社">
                     <option value="在宅">
                     <option value="新横浜">
-                    <option value="有給">
-                    <option value="特休">
-                    <option value="病欠">
+                </datalist>
+                <datalist id="absenceReasons">
+                    <option value="有給休暇">
+                    <option value="特別休暇">
+                    <option value="病気休暇">
+                    <option value="慶弔休暇">
+                    <option value="その他休暇">
+                    <option value="欠勤">
                 </datalist>
             </div>
 
@@ -103,7 +118,5 @@
         </div>
     </div>
 
-    <!-- スクリプトの読み込み -->
-    <script src="script.js"></script>
 </body>
 </html>
