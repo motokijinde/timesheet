@@ -42,7 +42,7 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(
             fetch(event.request).catch(() => {
                 // オフライン時は空のResponseを返す
-                return new Response('', { status: 503, statusText: 'Service Unavailable' });
+                return new Response('{}', { status: 503, statusText: 'Service Unavailable' });
             })
         );
         return;

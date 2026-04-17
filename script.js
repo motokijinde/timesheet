@@ -1,6 +1,7 @@
 // --- 設定 ---
 const GAS_URL = "https://script.google.com/macros/s/AKfycby2iRDr_4PABeo5AHDTWFh9PiVgvGSJCIlhu9qwLwgUGMurOL800B8WcwNlpSzmIsLEfA/exec";
-const OFFLINE_TIMEOUT = 5000; // オフライン判定タイムアウト(ms)
+const LOAD_TIMEOUT = 15000;  // データ取得タイムアウト(ms)：GASコールドスタート＋祝日API取得を考慮
+const SYNC_TIMEOUT = 10000;  // データ送信タイムアウト(ms)：スプレッドシート書き込みのみ
 const MAX_RETRY_ATTEMPTS = 3; // 最大リトライ回数
 const RETRY_DELAY = 2000; // リトライ間隔(ms)
 
@@ -20,9 +21,8 @@ try {
 window.addEventListener('online', () => {
     isOnline = true;
     console.log('Online detected');
-    // オンラインになったらキューを処理
+    hideOfflineIndicator();
     processQueue();
-    // オンライン通知を表示
     showOnlineIndicator();
 });
 
@@ -35,33 +35,35 @@ window.addEventListener('offline', () => {
 
 // オフライン/オンライン状態のインジケータ表示
 function showOfflineIndicator() {
-    const indicator = document.getElementById('offline-indicator');
+    let indicator = document.getElementById('offline-indicator');
     if (!indicator) {
-        const el = document.createElement('div');
-        el.id = 'offline-indicator';
-        el.className = 'offline-indicator';
-        el.innerText = 'オフライン: データはローカルで保存され、オンライン時に同期されます';
-        document.body.appendChild(el);
-    } else {
-        indicator.style.display = 'block';
+        indicator = document.createElement('div');
+        indicator.id = 'offline-indicator';
+        indicator.className = 'offline-indicator';
+        indicator.innerText = 'オフライン: データはローカルで保存され、オンライン時に同期されます';
+        document.body.appendChild(indicator);
     }
+    indicator.style.display = 'block';
+}
+
+function hideOfflineIndicator() {
+    const indicator = document.getElementById('offline-indicator');
+    if (indicator) indicator.style.display = 'none';
 }
 
 function showOnlineIndicator() {
-    const indicator = document.getElementById('online-indicator');
+    let indicator = document.getElementById('online-indicator');
     if (!indicator) {
-        const el = document.createElement('div');
-        el.id = 'online-indicator';
-        el.className = 'online-indicator';
-        el.innerText = 'オンライン: データを同期しています';
-        document.body.appendChild(el);
-    } else {
-        indicator.style.display = 'block';
-        // 2秒後にフェードアウト
-        setTimeout(() => {
-            indicator.style.display = 'none';
-        }, 2000);
+        indicator = document.createElement('div');
+        indicator.id = 'online-indicator';
+        indicator.className = 'online-indicator';
+        indicator.innerText = 'オンライン: データを同期しています';
+        document.body.appendChild(indicator);
     }
+    indicator.style.display = 'block';
+    setTimeout(() => {
+        indicator.style.display = 'none';
+    }, 2000);
 }
 
 window.onload = () => {
@@ -110,21 +112,27 @@ function logout(confirmLogout = true) {
 function showApp() {
     document.getElementById('loginArea').style.display = 'none';
     document.getElementById('mainApp').style.display = 'block';
-    
-    // ユーザー名表示箇所（上部バッジ）
     document.getElementById('displayUserName').innerText = currentUser;
 
-    loadData();
-    var now = new Date();
+    // viewDate を先に確定させてから loadData/initCalendar を呼ぶ（競合防止）
+    const now = new Date();
     viewDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    initCalendar();
+
+    // キャッシュがあれば即時描画（ローディング前に何も表示されない状態を避ける）
+    const cached = localStorage.getItem('cached_work_data');
+    if (cached) {
+        try { currentData = JSON.parse(cached); } catch(e) { currentData = {}; }
+        initCalendar();
+    }
+
+    loadData(); // 非同期で最新データを取得し再描画
 }
 
 // サーバーから最新データを取得
 async function loadData() {
     document.getElementById('loader').style.display = 'flex';
     
-    // オフライン状態の場合はキャッシュから読み込む
+    // オフライン状態の場合はキャッシュから読み込む（キャッシュ有無に関わらず return）
     if (!isOnline) {
         const cached = localStorage.getItem('cached_work_data');
         if (cached) {
@@ -141,9 +149,11 @@ async function loadData() {
                 }
             });
             initCalendar();
-            document.getElementById('loader').style.display = 'none';
-            return;
+        } else {
+            alert("オフラインのため、データを表示できません。\nオンライン環境で再度お試しください。");
         }
+        document.getElementById('loader').style.display = 'none';
+        return;
     }
     
     try {
@@ -151,8 +161,8 @@ async function loadData() {
         const year = viewDate.getFullYear();
         const cacheBuster = `&t=${new Date().getTime()}`;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), OFFLINE_TIMEOUT);
-        
+        const timeoutId = setTimeout(() => controller.abort(), LOAD_TIMEOUT);
+
         const res = await fetch(`${GAS_URL}?p=${encodeURIComponent(currentPass)}&u=${encodeURIComponent(currentUser)}&year=${year}${cacheBuster}`, {
             method: 'GET', 
             redirect: 'follow',
@@ -160,7 +170,12 @@ async function loadData() {
         });
         
         clearTimeout(timeoutId);
-        
+
+        // 503など非2xxはキャッシュフォールバックへ（ServiceWorkerのオフライン代替応答を含む）
+        if (!res.ok) {
+            throw new Error(`サーバーエラー: HTTP ${res.status}`);
+        }
+
         // テキストとして取得して判定
         const text = await res.text();
         
@@ -294,30 +309,19 @@ async function processQueue() {
             const item = pendings[0];
             
             try {
-                // オフライン状態の場合はリトライを設定して待機
+                // オフライン時は online イベントで processQueue() が呼ばれるのを待つ
                 if (!isOnline) {
-                    // オフライン時はリトライ回数を増やす
-                    item.retryCount = (item.retryCount || 0) + 1;
-                    if (item.retryCount <= MAX_RETRY_ATTEMPTS) {
-                        setTimeout(() => {
-                            processQueue();
-                        }, RETRY_DELAY * item.retryCount);
-                    } else {
-                        item.status = 'failed';
-                        saveQueue();
-                        initCalendar();
-                    }
                     break;
                 }
                 
                 // オンライン時は通常の送信処理
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), OFFLINE_TIMEOUT);
+                const timeoutId = setTimeout(() => controller.abort(), SYNC_TIMEOUT);
                 
                 await fetch(GAS_URL, {
                     method: "POST",
                     mode: "no-cors", 
-                    header: { "Content-Type": "text/plain" },
+                    headers: { "Content-Type": "text/plain" },
                     body: JSON.stringify({ ...item.payload, password: currentPass, user: currentUser }),
                     signal: controller.signal
                 });

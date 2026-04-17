@@ -121,18 +121,19 @@ button:active { opacity: 0.7; }
 .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .day-header { font-size: 11px; font-weight: bold; color: #aaa; text-align: center; padding-bottom: 5px; }
 
-.day { 
-    aspect-ratio: 1/1.4; 
-    border: 1px solid #f8f8f8; 
-    border-radius: 10px; 
-    padding: 2px; 
-    font-size: 10px; 
-    background: #fff; 
-    cursor: pointer; 
-    display: flex; 
-    flex-direction: column; 
+.day {
+    aspect-ratio: 1/1.4;
+    border: 1px solid #f8f8f8;
+    border-radius: 10px;
+    padding: 2px;
+    font-size: 10px;
+    background: #fff;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
     transition: background 0.2s;
     overflow: hidden;
+    position: relative; /* sync-icon の absolute 基準 */
 }
 
 /* 古いブラウザ用のフォールバック（aspect-ratio非対応時） */
@@ -262,17 +263,40 @@ button:active { opacity: 0.7; }
 /* --- 同期ステータスアイコン --- */
 .sync-icon {
     position: absolute;
-    top: 2px;
-    right: 2px;
-    font-size: 10px;
     z-index: var(--z-calendar-icon);
     background: rgba(255, 255, 255, 0.9);
+    border: 1px solid #ddd;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+/* ⌛ 送信待ち: 右上に小さく表示（操作不要なので目立たせない） */
+.sync-pending {
+    top: 2px;
+    right: 2px;
+    font-size: 9px;
     border-radius: 50%;
     padding: 1px;
-    border: 1px solid #ddd;
+    opacity: 0.7;
+    animation: spin 2s infinite linear;
 }
-.sync-pending { opacity: 0.7; animation: spin 2s infinite linear; }
-.sync-failed { opacity: 1; color: #d32f2f; cursor: pointer; background: rgba(244, 67, 54, 0.1); }
+
+/* ⚠️ 送信失敗: セル下部に横幅いっぱいのバッジで表示（タップしやすく） */
+.sync-failed {
+    bottom: 2px;
+    left: 2px;
+    right: 2px;
+    top: auto;
+    font-size: 9px;
+    border-radius: 3px;
+    padding: 1px 0;
+    background: rgba(244, 67, 54, 0.12);
+    border-color: rgba(244, 67, 54, 0.45);
+    color: #d32f2f;
+    cursor: pointer;
+}
 
 /* 同期中アイコンの回転アニメーション */
 @keyframes spin { 
