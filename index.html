@@ -2,45 +2,50 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#ffffff">
     <title>勤務報告ポチるだけ</title>
+
     <link rel="stylesheet" href="style.css">
-    
+
+    <!-- PWA / iOS ホーム画面追加用 -->
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" sizes="180x180" href="icon.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- defer により DOM 構築後に実行される (DOMContentLoaded 相当) -->
     <script src="script.js" defer></script>
 </head>
 <body>
-    <!-- ローディング表示（通信中に表示） -->
-    <div id="loader" class="loading-overlay">通信中...</div>
+    <!-- 通信中オーバーレイ (loadData / processQueue 中) -->
+    <div id="loader" class="loading-overlay" role="status" aria-live="polite">通信中...</div>
 
     <!-- 1. ログイン画面 -->
     <div id="loginArea">
         <h2>勤務報告ポチるだけ</h2>
         <div class="form-item">
-            <input type="text" id="userNameInput" placeholder="ユーザー名を入力">
+            <input type="text" id="userNameInput" placeholder="ユーザー名を入力" autocomplete="username">
         </div>
         <div class="form-item">
-            <input type="password" id="passwordInput" placeholder="パスワードを入力">
+            <input type="password" id="passwordInput" placeholder="パスワードを入力" autocomplete="current-password">
         </div>
         <button onclick="login()" class="btn-primary">ログイン</button>
     </div>
 
     <!-- 2. メインアプリ画面 -->
     <div class="container" id="mainApp" style="display: none;">
-        
-        <!-- ユーザーバッジ（右上配置） -->
-        <div class="user-badge" onclick="logout()" title="ログアウト">
+
+        <!-- 右上のユーザーバッジ (タップでログアウト) -->
+        <div class="user-badge" onclick="logout()" title="ログアウト" role="button" tabindex="0" aria-label="ログアウト">
             <span id="displayUserName">ユーザー</span>
-            <svg viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
         </div>
 
         <h2>勤務報告ポチるだけ</h2>
-        <div id="msg"></div>
-        
-        <!-- クイック入力ボタン -->
+        <div id="msg" role="status" aria-live="polite"></div>
+
+        <!-- クイック打刻ボタン (出社で開始 / 在宅で開始 / 作業を終了する) -->
         <div class="btn-group">
             <button class="btn-start" onclick="quickLog('start', '出社')">出社で開始</button>
             <button class="btn-start" onclick="quickLog('start', '在宅')">在宅で開始</button>
@@ -49,42 +54,48 @@
 
         <!-- 月切り替え -->
         <div class="month-selector">
-            <button class="nav-btn" onclick="changeMonth(-1)">◀ 前月</button>
+            <button class="nav-btn" onclick="changeMonth(-1)" aria-label="前の月へ">◀ 前月</button>
             <div id="monthDisplay"></div>
-            <button class="nav-btn" onclick="changeMonth(1)">次月 ▶</button>
+            <button class="nav-btn" onclick="changeMonth(1)" aria-label="次の月へ">次月 ▶</button>
         </div>
 
-        <!-- カレンダー本体 -->
+        <!-- カレンダー本体 (JS が initCalendar で構築) -->
         <div class="calendar" id="calendar"></div>
 
-        <!-- フッター操作 -->
+        <!-- フッター: 1ヶ月分の TSV をクリップボードへ書き出す -->
         <div class="footer">
             <button class="copy-btn" onclick="copyForExcel()">1ヶ月分を書き出す</button>
         </div>
     </div>
 
-    <!-- 3. 編集モーダル（日付クリック時に表示） -->
-    <div class="modal" id="editModal" style="display: none;">
+    <!-- 3. 編集モーダル (日付セルをタップすると表示) -->
+    <div class="modal" id="editModal" role="dialog" aria-modal="true" aria-labelledby="editDateLabel" style="display: none;">
         <div class="modal-content">
             <h4 id="editDateLabel"></h4>
-            
+
+            <!-- 欠勤・休暇 (全日扱い) -->
             <div class="form-item row">
-                <input type="checkbox" id="editIsAbsent" onchange="toggleAbsent()"> 
+                <input type="checkbox" id="editIsAbsent" onchange="toggleAbsent()">
                 <label for="editIsAbsent">欠勤 / 休暇</label>
             </div>
+
+            <!-- 半休 -->
             <div class="form-item row">
-                <input type="checkbox" id="editIsHalfDay" onchange="toggleHalfDay()"> 
+                <input type="checkbox" id="editIsHalfDay" onchange="toggleHalfDay()">
                 <label for="editIsHalfDay">半休</label>
             </div>
-            <div class="form-item row" id="halfDayOptions" style="display:none; margin-left:20px;">
+            <div class="form-item row" id="halfDayOptions" style="display: none; margin-left: 20px;">
                 <input type="radio" id="halfDayMorning" name="halfDayType" value="morning">
                 <label for="halfDayMorning">午前休</label>
-                <input type="radio" id="halfDayAfternoon" name="halfDayType" value="afternoon" style="margin-left:15px;">
+                <input type="radio" id="halfDayAfternoon" name="halfDayType" value="afternoon" style="margin-left: 15px;">
                 <label for="halfDayAfternoon">午後休</label>
             </div>
 
+            <!-- 勤務場所 (通常時) または 休暇理由 (欠勤時) -->
+            <!-- ※ 同じ input を datalist 切替で 2 つの用途に流用しているため、
+                 saveEdit でバリデーションを行い空入力を弾いている -->
             <div class="form-item">
-                <label class="lbl">勤務場所 または 理由</label>
+                <label class="lbl" for="editPlace">勤務場所 または 理由</label>
                 <input type="text" id="editPlace" list="places" placeholder="出社、在宅など">
                 <datalist id="places">
                     <option value="出社">
@@ -101,18 +112,19 @@
                 </datalist>
             </div>
 
+            <!-- 時刻 -->
             <div id="timeInputs">
                 <div class="form-item">
-                    <label class="lbl">開始時間</label>
+                    <label class="lbl" for="editStart">開始時間</label>
                     <input type="time" id="editStart">
                 </div>
                 <div class="form-item">
-                    <label class="lbl">終了時間</label>
+                    <label class="lbl" for="editEnd">終了時間</label>
                     <input type="time" id="editEnd">
                 </div>
             </div>
 
-            <button onclick="saveEdit()" class="btn-primary" style="padding:14px; border-radius:12px; margin-top:10px;">保存する</button>
+            <button onclick="saveEdit()" class="btn-primary" style="padding: 14px; border-radius: 12px; margin-top: 10px;">保存する</button>
             <button onclick="deleteEntry()" class="btn-delete">この日のデータを削除</button>
             <button onclick="closeModal()" class="btn-close">閉じる</button>
         </div>

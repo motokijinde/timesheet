@@ -1,60 +1,85 @@
-/* =================================
-   CSS変数定義
-   ================================= */
-:root { 
-    --primary: #464eb8;   /* プライマリカラー（メインボタン・見出し） */
-    --start: #e3f2fd;     /* 出勤ボタン背景（薄い青） */
-    --start-text: #1976d2; /* 出勤テキスト色 */
-    --end: #fff3e0;       /* 退勤ボタン背景（薄いオレンジ） */
-    --end-text: #f57c00;  /* 退勤テキスト色 */
-    --bg: #f8f9fa;        /* 背景色（全体のベース） */
-    --sat: #e8f4ff;       /* 土曜日の背景色（薄い青） */
-    --sun: #ffebee;       /* 日曜日・祝日の背景色（薄い赤） */
-    
-    /* z-index階層定義 */
+/* =============================================================================
+   勤務報告アプリ - スタイルシート
+
+   構成:
+     1. CSS 変数 (色 / z-index)
+     2. 基本レイアウト (body, ログイン画面, メインコンテナ)
+     3. ボタン群
+     4. カレンダー (グリッド / セル / 祝日 / 同期アイコン)
+     5. モーダル (編集ダイアログ)
+     6. フッター (1ヶ月分書き出しボタン)
+     7. オーバーレイ通知 (ロード中 / オフライン / オンライン)
+   ============================================================================= */
+
+
+/* === 1. CSS 変数 ============================================================ */
+:root {
+    --primary: #464eb8;       /* メインボタン・見出し */
+    --start: #e3f2fd;         /* 出社/在宅ボタン背景 */
+    --start-text: #1976d2;
+    --end: #fff3e0;           /* 終了ボタン背景 */
+    --end-text: #f57c00;
+    --bg: #f8f9fa;
+    --sat: #e8f4ff;           /* 土曜セル */
+    --sun: #ffebee;           /* 日曜・祝日セル */
+
+    /* z-index 階層 (重なり順を一箇所で管理) */
     --z-calendar-icon: 5;
     --z-modal: 1000;
     --z-notification: 1001;
     --z-loading: 2000;
 }
 
-/* =================================
-   基本レイアウト
-   ================================= */
+
+/* === 2. 基本レイアウト ====================================================== */
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-    background: var(--bg); 
-    display: flex; 
-    flex-direction: column; 
-    align-items: center; 
-    padding: 10px; 
-    margin: 0; 
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px;
+    margin: 0;
 }
 
-/* ログイン画面とメインアプリ画面の共通スタイル */
-#loginArea, .container { 
-    background: white; 
-    padding: 20px; 
-    border-radius: 20px; 
-    box-shadow: 0 10px 30px rgba(0,0,0,0.08); 
-    width: 100%; 
-    max-width: 450px; 
-    box-sizing: border-box; 
+/* ログイン画面とメイン画面の共通カードスタイル */
+#loginArea, .container {
+    background: white;
+    padding: 20px;
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    width: 100%;
+    max-width: 450px;
+    box-sizing: border-box;
     position: relative;
-    /* モバイル向けセンタリング調整 */
-    margin: 0 auto; 
+    margin: 0 auto;
 }
 
-/* ログイン画面エリア */
-#loginArea { display: block; text-align: center; margin-top: 50px; max-width: 350px; }
+#loginArea {
+    display: block;
+    text-align: center;
+    margin-top: 50px;
+    max-width: 350px;
+}
 
-/* メインアプリケーション画面（ログイン後に表示） */
 .container { display: none; }
 
-h2 { color: var(--primary); text-align: center; font-size: 22px; margin: 10px 0 20px 0; /* 少し下マージン追加 */ }
-#msg { text-align:center; height:24px; font-size:13px; color:var(--primary); font-weight:500; }
+h2 {
+    color: var(--primary);
+    text-align: center;
+    font-size: 22px;
+    margin: 10px 0 20px 0;
+}
 
-/* --- ユーザーバッジ（右上配置） --- */
+#msg {
+    text-align: center;
+    height: 24px;
+    font-size: 13px;
+    color: var(--primary);
+    font-weight: 500;
+}
+
+/* 右上のユーザーバッジ (タップでログアウト) */
 .user-badge {
     position: absolute;
     top: 15px;
@@ -81,175 +106,6 @@ h2 { color: var(--primary); text-align: center; font-size: 22px; margin: 10px 0 
     height: 14px;
 }
 
-/* =================================
-   ボタン類
-   ================================= */
-
-/* ログアウトボタン */
-.btn-logout-text {
-    background: transparent;
-    border: none;
-    color: #999;
-    font-size: 13px;
-    text-decoration: underline;
-    cursor: pointer;
-    padding: 8px 16px;
-}
-.btn-logout-text:hover {
-    color: #f44336;
-    text-decoration: none;
-    background: #fff5f5;
-}
-
-/* ボタングループ（出社・在宅・終了） */
-.btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
-
-/* 全ボタン共通スタイル */
-button { padding: 14px; border-radius: 12px; border: 1px solid #eee; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
-button:active { opacity: 0.7; }
-
-.btn-primary { background: var(--primary); color: white; border: none; width: 100%; }
-.btn-start { background: var(--start); color: var(--start-text); }
-.btn-end { background: var(--end); color: var(--end-text); }
-
-/* --- カレンダー表示 --- */
-.month-selector { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
-.nav-btn { background: #f0f0f0; border: none; padding: 8px 15px; border-radius: 8px; font-size: 12px; }
-#monthDisplay { font-weight: 700; font-size: 17px; }
-
-/* カレンダーグリッド（7列：日曜～土曜） */
-.calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-.day-header { font-size: 11px; font-weight: bold; color: #aaa; text-align: center; padding-bottom: 5px; }
-
-.day {
-    aspect-ratio: 1/1.4;
-    border: 1px solid #f8f8f8;
-    border-radius: 10px;
-    padding: 2px;
-    font-size: 10px;
-    background: #fff;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    transition: background 0.2s;
-    overflow: hidden;
-    position: relative; /* sync-icon の absolute 基準 */
-}
-
-/* 古いブラウザ用のフォールバック（aspect-ratio非対応時） */
-@supports not (aspect-ratio: 1/1.4) {
-    .day {
-        position: relative;
-        width: 100%;
-        padding-bottom: 140%; /* 1:1.4の比率 */
-        padding: 0; /* paddingをリセット */
-    }
-    
-    .day > * {
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        right: 2px;
-        bottom: 2px;
-    }
-}
-.day:hover { background-color: #fafafa; }
-.day.sat { background-color: var(--sat); }
-.day.sun, .day.holiday { background-color: var(--sun); }
-.day.today { border: 2px solid var(--primary); }
-.day-num { font-weight: bold; font-size: 11px; margin-bottom: 0; }
-
-/* 祝日名: 日付の下に独立行で表示 */
-.holiday-lbl {
-    font-size: 7.5px;
-    color: #c62828;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1;
-    margin: 1px 0 2px 0;
-    width: 100%;
-    /* モバイル用に幅制限を解除または調整 */
-    max-width: none; 
-}
-
-/* カレンダー内の勤務記録ラベル */
-.entry { 
-    font-size: 8px; /* 少し小さく */
-    margin-top: 1px; 
-    line-height: normal; 
-    padding: 1px 0; /* 横パディング極小 */
-    border-radius: 3px;
-    white-space: nowrap; 
-    overflow: hidden; 
-    font-weight: bold;
-    /* 記号と数字を並べて中央寄せ */
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 1px; /* 記号との間隔を最小限に */
-}
-
-/* ボタンの色と同期させた背景色 */
-.entry-start { background-color: var(--start); color: var(--start-text); }
-.entry-end { background-color: var(--end); color: var(--end-text); }
-.entry-absent { background-color: var(--sun); color: #d32f2f; justify-content: center; font-size: 8px; }
-.entry-holiday { background-color: #fff3e0; color: #f57c00; justify-content: center; font-size: 8px; }
-.entry-halfday { background-color: #fff3e0; color: #ff9800; justify-content: center; font-size: 8px; }
-
-/* --- モーダル --- */
-.modal { 
-    display: none; 
-    position: fixed; 
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    inset: 0; /* モダンブラウザ用の省略記法 */
-    background: rgba(0,0,0,0.5); 
-    backdrop-filter: blur(4px); 
-    -webkit-backdrop-filter: blur(4px); /* Safari用 */
-    align-items: center; 
-    justify-content: center; 
-    z-index: var(--z-modal); 
-}
-/* 横幅を少し広げて(max-width: 380px)、ゆとりを持たせる */
-.modal-content { background: white; padding: 25px; border-radius: 24px; width: 90%; max-width: 380px; box-sizing: border-box; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
-.form-item { margin-bottom: 15px; }
-.form-item.row { display: flex; align-items: center; gap: 8px; color: #d32f2f; font-weight: bold; }
-/* チェックボックスは標準サイズ（控えめに） */
-.form-item.row input[type="checkbox"] {
-    margin: 0;
-    cursor: pointer;
-    accent-color: #d32f2f;
-}
-.form-item input[type="text"], .form-item input[type="time"] { width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 10px; box-sizing: border-box; font-size: 16px; }
-.lbl { font-size: 11px; color: #888; display: block; margin-bottom: 3px; }
-
-.btn-delete { width:100%; border:1px solid #f44336; color:#f44336; background:none; margin-top:15px; padding:10px; border-radius:12px; font-weight:bold; }
-.btn-close { width:100%; background:none; border:none; color:#999; margin-top:10px; }
-
-/* --- フッター --- */
-.footer { margin-top: 20px; width: 100%; }
-.copy-btn { width: 100%; background: var(--primary); color: white; padding: 16px; border-radius: 14px; border: none; font-size: 16px; font-weight: bold; transition: transform 0.1s; }
-.copy-btn:active { transform: scale(0.98); }
-
-.loading-overlay { 
-    position: fixed; 
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    inset: 0; /* モダンブラウザ用の省略記法 */
-    background: rgba(255,255,255,0.7); 
-    display: none; 
-    align-items: center; 
-    justify-content: center; 
-    z-index: var(--z-loading); 
-    font-weight: bold; 
-    color: var(--primary); 
-}
-
 #loginArea input {
     width: 100%;
     padding: 12px;
@@ -260,7 +116,139 @@ button:active { opacity: 0.7; }
     margin-bottom: 10px;
 }
 
-/* --- 同期ステータスアイコン --- */
+
+/* === 3. ボタン群 ============================================================ */
+.btn-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+button {
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid #eee;
+    cursor: pointer;
+    font-weight: bold;
+    transition: opacity 0.2s;
+}
+button:active { opacity: 0.7; }
+
+.btn-primary  { background: var(--primary); color: white; border: none; width: 100%; }
+.btn-start    { background: var(--start); color: var(--start-text); }
+.btn-end      { background: var(--end);   color: var(--end-text); }
+.btn-delete   { width: 100%; border: 1px solid #f44336; color: #f44336; background: none; margin-top: 15px; padding: 10px; border-radius: 12px; font-weight: bold; }
+.btn-close    { width: 100%; background: none; border: none; color: #999; margin-top: 10px; }
+
+
+/* === 4. カレンダー ========================================================== */
+.month-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 15px;
+}
+.nav-btn {
+    background: #f0f0f0;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 8px;
+    font-size: 12px;
+}
+#monthDisplay {
+    font-weight: 700;
+    font-size: 17px;
+}
+
+.calendar {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+}
+.day-header {
+    font-size: 11px;
+    font-weight: bold;
+    color: #aaa;
+    text-align: center;
+    padding-bottom: 5px;
+}
+
+.day {
+    aspect-ratio: 1 / 1.4;
+    border: 1px solid #f8f8f8;
+    border-radius: 10px;
+    padding: 2px;
+    font-size: 10px;
+    background: #fff;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    transition: background 0.2s;
+    overflow: hidden;
+    position: relative; /* sync-icon の絶対配置基準 */
+}
+
+/* aspect-ratio 非対応ブラウザ用フォールバック */
+@supports not (aspect-ratio: 1 / 1.4) {
+    .day {
+        position: relative;
+        width: 100%;
+        padding-bottom: 140%;
+        padding: 0;
+    }
+    .day > * {
+        position: absolute;
+        top: 2px; left: 2px; right: 2px; bottom: 2px;
+    }
+}
+
+.day:hover { background-color: #fafafa; }
+.day.sat   { background-color: var(--sat); }
+.day.sun   { background-color: var(--sun); }    /* 日曜・祝日共通 */
+.day.today { border: 2px solid var(--primary); }
+
+.day-num {
+    font-weight: bold;
+    font-size: 11px;
+    margin-bottom: 0;
+}
+
+/* 祝日名は日付の下段に独立行で表示 (狭幅セルでも見切れ防止) */
+.holiday-lbl {
+    font-size: 7.5px;
+    color: #c62828;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1;
+    margin: 1px 0 2px 0;
+    width: 100%;
+}
+
+/* カレンダー内の勤怠ラベル */
+.entry {
+    font-size: 8px;
+    margin-top: 1px;
+    line-height: normal;
+    padding: 1px 0;
+    border-radius: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    font-weight: bold;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1px;
+}
+
+.entry-place   { background-color: transparent; color: #333; font-weight: normal; }
+.entry-start   { background-color: var(--start); color: var(--start-text); }
+.entry-end     { background-color: var(--end);   color: var(--end-text); }
+.entry-absent  { background-color: var(--sun); color: #d32f2f; }
+.entry-halfday { background-color: #fff3e0; color: #ff9800; }
+
+/* 同期ステータスアイコン */
 .sync-icon {
     position: absolute;
     z-index: var(--z-calendar-icon);
@@ -272,7 +260,7 @@ button:active { opacity: 0.7; }
     line-height: 1;
 }
 
-/* ⌛ 送信待ち: 右上に小さく表示（操作不要なので目立たせない） */
+/* 送信中: セル右上に小さく (操作不要なので主張しない) */
 .sync-pending {
     top: 2px;
     right: 2px;
@@ -283,7 +271,7 @@ button:active { opacity: 0.7; }
     animation: spin 2s infinite linear;
 }
 
-/* ⚠️ 送信失敗: セル下部に横幅いっぱいのバッジで表示（タップしやすく） */
+/* 送信失敗: セル下部に幅いっぱいのバッジ (タップしやすく) */
 .sync-failed {
     bottom: 2px;
     left: 2px;
@@ -298,67 +286,120 @@ button:active { opacity: 0.7; }
     cursor: pointer;
 }
 
-/* 同期中アイコンの回転アニメーション */
-@keyframes spin { 
-    100% { transform: rotate(360deg); } 
+@keyframes spin {
+    100% { transform: rotate(360deg); }
 }
 
-/* オンライン通知のフェードアウトアニメーション */
-@keyframes fadeOut {
-    0% { 
-        opacity: 1; 
-        visibility: visible; 
-    }
-    99% { 
-        opacity: 0; 
-        visibility: visible; 
-    }
-    100% { 
-        opacity: 0; 
-        visibility: hidden; 
-    }
-}
 
-.entry-place {
-    background-color: transparent;
-    color: #333;
-    font-weight: normal;
-}
-
-/* オフライン状態の視覚的フィードバック */
-.offline-indicator {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    inset: 0; /* モダンブラウザ用の省略記法 */
-    top: 0;
-    bottom: auto; /* insetを上書きして上部のみ固定 */
-    background: #f44336;
-    color: white;
-    text-align: center;
-    padding: 8px;
-    font-size: 12px;
-    z-index: var(--z-notification);
+/* === 5. モーダル (編集ダイアログ) =========================================== */
+.modal {
     display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    align-items: center;
+    justify-content: center;
+    z-index: var(--z-modal);
 }
 
+.modal-content {
+    background: white;
+    padding: 25px;
+    border-radius: 24px;
+    width: 90%;
+    max-width: 380px;
+    box-sizing: border-box;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.form-item { margin-bottom: 15px; }
+
+/* チェックボックス + ラベルを横並びにする行 */
+.form-item.row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #d32f2f;
+    font-weight: bold;
+}
+.form-item.row input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+    accent-color: #d32f2f;
+}
+
+.form-item input[type="text"],
+.form-item input[type="time"] {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #eee;
+    border-radius: 10px;
+    box-sizing: border-box;
+    font-size: 16px; /* iOS で 16px 未満はズームされるので必ず 16px 以上 */
+}
+
+.lbl {
+    font-size: 11px;
+    color: #888;
+    display: block;
+    margin-bottom: 3px;
+}
+
+
+/* === 6. フッター ============================================================ */
+.footer {
+    margin-top: 20px;
+    width: 100%;
+}
+.copy-btn {
+    width: 100%;
+    background: var(--primary);
+    color: white;
+    padding: 16px;
+    border-radius: 14px;
+    border: none;
+    font-size: 16px;
+    font-weight: bold;
+    transition: transform 0.1s;
+}
+.copy-btn:active { transform: scale(0.98); }
+
+
+/* === 7. オーバーレイ通知 ==================================================== */
+
+/* 通信中 (loadData / processQueue) */
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: var(--z-loading);
+    font-weight: bold;
+    color: var(--primary);
+}
+
+/* 上部バー (オフライン: 赤 / オンライン: 緑) */
+.offline-indicator,
 .online-indicator {
     position: fixed;
     top: 0;
-    right: 0;
-    bottom: 0;
     left: 0;
-    inset: 0; /* モダンブラウザ用の省略記法 */
-    top: 0;
-    bottom: auto; /* insetを上書きして上部のみ固定 */
-    background: #4caf50;
-    color: white;
+    right: 0;
     text-align: center;
     padding: 8px;
     font-size: 12px;
+    color: white;
     z-index: var(--z-notification);
     display: none;
-    animation: fadeOut 2s forwards;
+}
+.offline-indicator { background: #f44336; }
+.online-indicator {
+    background: #4caf50;
+    /* 表示は JS から opacity を 0/1 に切り替えるとフェード in/out になる */
+    opacity: 0;
+    transition: opacity 0.5s ease-out;
 }

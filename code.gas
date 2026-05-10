@@ -1,212 +1,355 @@
-const APP_PASS = "passwd";
+/**
+ * 勤務報告アプリ - Google Apps Script バックエンド
+ *
+ * 役割:
+ *   - フロントエンド (index.html / script.js) からの GET/POST を受け、
+ *     対象スプレッドシートのユーザーごとシートに勤怠データを読み書きする。
+ *   - 日本の祝日を https://holidays-jp.github.io/api/v1 から取得し、
+ *     表示中の年 ±1 の祝日マップをレスポンスにマージする。
+ *
+ * 互換性: 既存スプレッドシートのスキーマは [日付, 場所, 開始, 終了, 休暇種別] の 5 列固定。
+ *
+ * デプロイ:
+ *   1. このファイルを Apps Script エディタに貼り付ける。
+ *   2. 初回のみ「プロジェクトの設定 → スクリプト プロパティ」に APP_PASS を登録する。
+ *      未設定時は下記 FALLBACK_PASS が使われるが、本番では必ず Properties に置くこと。
+ *   3. 「デプロイ → デプロイを管理 → 編集 → 新しいバージョン → デプロイ」。 URL は不変。
+ */
 
+// =============================================================================
+// 定数
+// =============================================================================
+
+/**
+ * Properties Service 未設定時のフォールバックパスワード。
+ * リポジトリに残す前提のため、本番では必ず Properties にユニークな値を設定すること。
+ */
+const FALLBACK_PASS = 'passwd';
+
+/** スプレッドシートのヘッダー行 (新規シート作成時に書き込む) */
+const SHEET_HEADER = ['日付', '場所', '開始', '終了', '休暇種別'];
+
+/**
+ * 休暇種別の文字列はフロントエンド (script.js の VACATION_TYPES) と
+ * 完全一致している必要がある。 変更する場合は両方を同時に更新する。
+ */
+const VACATION_TYPES = {
+  // 全日扱いの休暇
+  ABSENT: ['有給休暇', '特別休暇', '病気休暇', '慶弔休暇', 'その他休暇', '欠勤'],
+  // 半休扱い (2 種類のみ)
+  HALF_MORNING: '午前半休',
+  HALF_AFTERNOON: '午後半休',
+};
+
+/** 祝日 API のエンドポイント (年単位の date.json) */
+const HOLIDAYS_API = (year) => `https://holidays-jp.github.io/api/v1/${year}/date.json`;
+
+/** 祝日キャッシュ TTL (秒) */
+const HOLIDAYS_CACHE_TTL_SEC = 24 * 3600;
+
+
+// =============================================================================
+// エントリポイント: GET / POST
+// =============================================================================
+
+/**
+ * GET /exec?p=<pass>&u=<user>&year=<yyyy>
+ * レスポンス: { ok: true, data: { 'YYYY-MM-DD': { ...entry } } } または { ok: false, error }
+ *
+ * data には対象ユーザーの全勤怠 + 表示中の年 ±1 の祝日が含まれる。
+ */
 function doGet(e) {
-  const p = e.parameter.p;
-  const user = e.parameter.u;
-  if (p !== APP_PASS || !user) return ContentService.createTextOutput("Forbidden");
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(user);
-  
-  const data = {};
-  
-  // 勤怠データの取得
-  if (sheet) {
-    const values = sheet.getDataRange().getDisplayValues(); 
-    
-    for (let i = 1; i < values.length; i++) {
-      const row = values[i];
-      if (!row[0]) continue;
-      
-      let dateKey = row[0].trim();
-      if (dateKey.includes('/')) dateKey = dateKey.replace(/\//g, '-'); 
-
-      const vacationType = row[4] || ""; // E列：休暇種別
-      
-      // 休暇判定
-      const isAbsent = isVacationDay(vacationType);
-      const isHalfDay = isHalfDayVacation(vacationType);
-      
-      // 祝日情報取得
-      const holidayInfo = getHolidayInfo(dateKey);
-      
-      data[dateKey] = { 
-        place: row[1] || "", 
-        start: row[2] || "", 
-        end: row[3] || "", 
-        vacationType: vacationType,
-        isAbsent: isAbsent,
-        isHalfDay: isHalfDay,
-        isHoliday: holidayInfo.isHoliday,
-        holidayName: holidayInfo.holidayName,
-        absenceReason: vacationType
-      };
-    }
+  if (!isAuthorized_(e.parameter.p) || !e.parameter.u) {
+    return jsonOutput_({ ok: false, error: 'forbidden' });
   }
-  
-  // 表示中の年の祝日情報を全て追加（勤怠データがない日も含む）
-  const year = e.parameter.year ? parseInt(e.parameter.year) : new Date().getFullYear();
-  const holidays = getHolidays(year);
-  
-  for (const dateKey in holidays) {
-    if (!data[dateKey]) {
-      // 勤怠データがない日の祝日情報を追加
-      data[dateKey] = {
-        place: "",
-        start: "",
-        end: "",
-        vacationType: "",
-        isAbsent: false,
-        isHalfDay: false,
-        isHoliday: true,
-        holidayName: holidays[dateKey],
-        absenceReason: ""
-      };
+
+  try {
+    const user = e.parameter.u;
+    const year = e.parameter.year ? parseInt(e.parameter.year, 10) : new Date().getFullYear();
+
+    const data = readUserData_(user);
+    mergeHolidaysIntoData_(data, year);
+
+    return jsonOutput_({ ok: true, data });
+  } catch (err) {
+    console.error('doGet error:', err);
+    return jsonOutput_({ ok: false, error: String((err && err.message) || err) });
+  }
+}
+
+/**
+ * POST /exec
+ * Body (text/plain で送られる JSON):
+ *   { password, user, date, place, start, end, isAbsent, isHalfDay, halfDayType, isDelete? }
+ * レスポンス: { ok: true } または { ok: false, error }
+ */
+function doPost(e) {
+  let postData;
+  try {
+    postData = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return jsonOutput_({ ok: false, error: 'invalid-json' });
+  }
+
+  if (!isAuthorized_(postData.password)) {
+    return jsonOutput_({ ok: false, error: 'forbidden' });
+  }
+  if (!postData.user || !postData.date) {
+    return jsonOutput_({ ok: false, error: 'missing-fields' });
+  }
+
+  try {
+    const sheet = getOrCreateSheet_(postData.user);
+
+    if (postData.isDelete) {
+      deleteRow_(sheet, postData.date);
     } else {
-      // 勤怠データがある日にも祝日情報を追加
-      data[dateKey].isHoliday = true;
-      data[dateKey].holidayName = holidays[dateKey];
+      upsertRow_(sheet, postData);
     }
+
+    return jsonOutput_({ ok: true });
+  } catch (err) {
+    console.error('doPost error:', err);
+    return jsonOutput_({ ok: false, error: String((err && err.message) || err) });
   }
-  
-  return ContentService.createTextOutput(JSON.stringify(data))
+}
+
+
+// =============================================================================
+// 認証 / レスポンスヘルパ
+// =============================================================================
+
+/**
+ * 受け取ったパスワードが、現在有効な APP_PASS と一致するか判定する。
+ * Properties Service に APP_PASS が設定されていればそれを優先し、
+ * 未設定時のみ FALLBACK_PASS にフォールバックする。
+ */
+function isAuthorized_(received) {
+  if (!received) return false;
+  const expected = PropertiesService.getScriptProperties().getProperty('APP_PASS') || FALLBACK_PASS;
+  return received === expected;
+}
+
+/** オブジェクトを JSON 文字列化して MIME=JSON で返すユーティリティ。 */
+function jsonOutput_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// 全日休暇判定関数
-function isVacationDay(vacationType) {
-  const vacationTypes = [
-    "有給休暇", "特別休暇", "病気休暇", "慶弔休暇", 
-    "その他休暇", "欠勤"
+
+// =============================================================================
+// シート操作
+// =============================================================================
+
+/** ユーザー名のシートを取得。なければ新規作成し、ヘッダーと A 列の表示形式を設定する。 */
+function getOrCreateSheet_(user) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(user);
+  if (!sheet) {
+    sheet = ss.insertSheet(user);
+    sheet.appendRow(SHEET_HEADER);
+    // 列 A の日付フォーマットを統一しておくと、後段の文字列比較が安定する
+    sheet.getRange('A:A').setNumberFormat('yyyy-MM-dd');
+  }
+  return sheet;
+}
+
+/**
+ * ユーザーシートを読み出して、 'YYYY-MM-DD' をキーとした連想配列に変換する。
+ * シートが存在しない (= 初回利用前) ユーザーは空オブジェクトを返す。
+ */
+function readUserData_(user) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(user);
+  const data = {};
+  if (!sheet) return data;
+
+  // getDisplayValues は表示形式の文字列を返す。 列 A のフォーマットを yyyy-MM-dd にしているため
+  // 通常はそのまま使えるが、既存シートで形式が違うケースに備えて normalizeDateKey_ を通す。
+  const values = sheet.getDataRange().getDisplayValues();
+
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    if (!row[0]) continue;
+    const dateKey = normalizeDateKey_(row[0]);
+    if (!dateKey) continue;
+
+    const vacationType = row[4] || '';
+    data[dateKey] = {
+      place: row[1] || '',
+      start: row[2] || '',
+      end: row[3] || '',
+      vacationType: vacationType,
+      isAbsent: VACATION_TYPES.ABSENT.indexOf(vacationType) !== -1,
+      isHalfDay: vacationType === VACATION_TYPES.HALF_MORNING || vacationType === VACATION_TYPES.HALF_AFTERNOON,
+      // 祝日情報は mergeHolidaysIntoData_ で後付けする (このループでは false 固定)
+      isHoliday: false,
+      holidayName: '',
+      // フロント互換のため absenceReason を残しておく (= vacationType と同義)
+      absenceReason: vacationType,
+    };
+  }
+  return data;
+}
+
+/**
+ * 1 行の作成 or 更新を行う。 既存日付の行があれば setValues、なければ appendRow + ソート。
+ *
+ * バリデーション:
+ *   - isHalfDay の場合、halfDayType が 'morning' / 'afternoon' のいずれかでなければエラー。
+ *     (旧コードにあった時間文字列からの推測 fallback は意図しない誤判定の元なので撤廃した)
+ */
+function upsertRow_(sheet, postData) {
+  const targetDate = postData.date;
+
+  // 休暇種別 (E 列) を決定
+  let vacationType = '';
+  if (postData.isAbsent) {
+    // 欠勤・休暇: place フィールドに理由が入っている前提
+    // (フロント側で空入力をブロックする想定だが、サーバ側でも空を許容しない)
+    vacationType = postData.place || '';
+    if (!vacationType) throw new Error('absent-reason-required');
+  } else if (postData.isHalfDay) {
+    if (postData.halfDayType === 'morning') {
+      vacationType = VACATION_TYPES.HALF_MORNING;
+    } else if (postData.halfDayType === 'afternoon') {
+      vacationType = VACATION_TYPES.HALF_AFTERNOON;
+    } else {
+      throw new Error('halfDayType-required');
+    }
+  }
+
+  const newRow = [
+    targetDate,
+    postData.isAbsent ? '' : (postData.place || ''),
+    postData.start || '',
+    postData.end || '',
+    vacationType,
   ];
-  return vacationTypes.includes(vacationType);
+
+  const rowIndex = findRowIndexByDate_(sheet, targetDate);
+  if (rowIndex !== -1) {
+    // 既存行の更新時は順序が変わらないのでソート不要
+    sheet.getRange(rowIndex, 1, 1, SHEET_HEADER.length).setValues([newRow]);
+  } else {
+    sheet.appendRow(newRow);
+    // 新規追加時のみソートして時系列に並べ直す
+    if (sheet.getLastRow() > 1) {
+      sheet.getRange(2, 1, sheet.getLastRow() - 1, SHEET_HEADER.length)
+        .sort({ column: 1, ascending: true });
+    }
+  }
 }
 
-// 半休判定関数
-function isHalfDayVacation(vacationType) {
-  return vacationType === "午前半休" || vacationType === "午後半休";
+/** 指定日付の行を削除する (祝日情報はクライアント側で再構築されるためここでは行ごと削除)。 */
+function deleteRow_(sheet, targetDate) {
+  const rowIndex = findRowIndexByDate_(sheet, targetDate);
+  if (rowIndex !== -1) {
+    sheet.deleteRow(rowIndex);
+  }
 }
 
-// 祝日情報取得関数（名前も返す）
-function getHolidayInfo(dateStr) {
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return { isHoliday: false, holidayName: "" };
-  
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const key = `${year}-${month}-${day}`;
-  
-  const holidays = getHolidays(year);
-  const holidayName = holidays[key] || "";
-  
-  return {
-    isHoliday: !!holidayName,
-    holidayName: holidayName
-  };
+/** A 列の表示文字列を normalize しつつ、targetDate と一致する行番号を 1-origin で返す (なければ -1)。 */
+function findRowIndexByDate_(sheet, targetDate) {
+  const values = sheet.getDataRange().getDisplayValues();
+  for (let i = 1; i < values.length; i++) {
+    if (normalizeDateKey_(values[i][0]) === targetDate) return i + 1;
+  }
+  return -1;
 }
 
-// 祝日データ取得関数（キャッシュ付き）
-function getHolidays(year) {
+
+// =============================================================================
+// 祝日
+// =============================================================================
+
+/**
+ * data に「表示中年 ±1」の祝日情報をマージする。
+ *   - data[dateKey] が存在しなければ祝日のみのレコードを追加。
+ *   - 既存のレコードには isHoliday/holidayName を後付けで上書き。
+ */
+function mergeHolidaysIntoData_(data, year) {
+  const allHolidays = Object.assign(
+    {},
+    getHolidays_(year - 1),
+    getHolidays_(year),
+    getHolidays_(year + 1)
+  );
+
+  for (const dateKey in allHolidays) {
+    if (!data[dateKey]) {
+      data[dateKey] = {
+        place: '',
+        start: '',
+        end: '',
+        vacationType: '',
+        isAbsent: false,
+        isHalfDay: false,
+        isHoliday: true,
+        holidayName: allHolidays[dateKey],
+        absenceReason: '',
+      };
+    } else {
+      data[dateKey].isHoliday = true;
+      data[dateKey].holidayName = allHolidays[dateKey];
+    }
+  }
+}
+
+/**
+ * 指定年の祝日マップを取得する。 ScriptCache に 24 時間キャッシュする。
+ * 取得失敗時 (API 障害・ネットワーク不通) は空オブジェクトを返し、機能を縮退させる。
+ */
+function getHolidays_(year) {
   const cache = CacheService.getScriptCache();
   const cacheKey = `holidays_${year}`;
-  
   const cached = cache.get(cacheKey);
-  if (cached) {
-    return JSON.parse(cached);
-  }
-  
+  if (cached) return JSON.parse(cached);
+
   try {
-    const url = `https://holidays-jp.github.io/api/v1/${year}/date.json`;
-    const response = UrlFetchApp.fetch(url);
+    const response = UrlFetchApp.fetch(HOLIDAYS_API(year), { muteHttpExceptions: true });
+    if (response.getResponseCode() !== 200) return {};
     const holidays = JSON.parse(response.getContentText());
-    
-    cache.put(cacheKey, JSON.stringify(holidays), 24 * 3600);
-    
+    cache.put(cacheKey, JSON.stringify(holidays), HOLIDAYS_CACHE_TTL_SEC);
     return holidays;
-  } catch (e) {
-    console.error('祝日データ取得失敗:', e);
+  } catch (err) {
+    console.error('holidays fetch failed:', err);
     return {};
   }
 }
 
-function doPost(e) {
-  try {
-    const postData = JSON.parse(e.postData.contents);
-    if (postData.password !== APP_PASS) return;
 
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName(postData.user);
-    
-    // 新規シート作成時は新しい構造で作成
-    if (!sheet) {
-      sheet = ss.insertSheet(postData.user);
-      sheet.appendRow(["日付", "場所", "開始", "終了", "休暇種別"]);
-    }
+// =============================================================================
+// ユーティリティ
+// =============================================================================
 
-    const values = sheet.getDataRange().getDisplayValues();
-    const targetDate = postData.date;
-    let rowIndex = -1;
+/**
+ * 入力された日付文字列を 'YYYY-MM-DD' 形式に正規化する。
+ * 想定される入力:
+ *   - 'YYYY-MM-DD'      (理想形式: そのまま返す)
+ *   - 'YYYY/M/D' 等     (区切りとパディングを補正)
+ *   - 一般的な Date.parse できる形式 (タイムゾーンに依存するため最後の手段)
+ *
+ * 解釈不能な値は元の文字列を返す。
+ */
+function normalizeDateKey_(rawKey) {
+  if (rawKey === null || rawKey === undefined) return '';
+  const trimmed = String(rawKey).trim();
+  if (!trimmed) return '';
 
-    for (let i = 1; i < values.length; i++) {
-      let sDate = values[i][0].replace(/\//g, '-').trim();
-      if (sDate === targetDate) { rowIndex = i + 1; break; }
-    }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
 
-    if (postData.isDelete) {
-      // 勤怠データを削除（行を削除）
-      if (rowIndex !== -1) {
-        sheet.deleteRow(rowIndex);
-      }
-      // 注意: 祝日情報はdoGetで自動的に追加されるため、削除後も表示される
-    } else {
-      // 休暇種別の決定
-      let vacationType = "";
-      
-      if (postData.isAbsent) {
-        // 欠勤・休暇の場合、placeに理由が入っている（空の場合もそのまま保存）
-        vacationType = postData.place || "";
-      } else if (postData.isHalfDay) {
-        // 半休の場合
-        if (postData.halfDayType === "morning") {
-          vacationType = "午前半休";
-        } else if (postData.halfDayType === "afternoon") {
-          vacationType = "午後半休";
-        } else {
-          // 時間から推測
-          const start = postData.start || "";
-          const end = postData.end || "";
-          if (start.includes("9:00") && end.includes("12:00")) {
-            vacationType = "午前半休";
-          } else if (start.includes("13:00") && end.includes("18:00")) {
-            vacationType = "午後半休";
-          } else {
-            vacationType = "午前半休"; // デフォルト
-          }
-        }
-      }
-      
-      const newRow = [
-        targetDate, 
-        postData.isAbsent ? "" : (postData.place || ""),
-        postData.start || "", 
-        postData.end || "", 
-        vacationType
-      ];
-      
-      if (rowIndex !== -1) {
-        sheet.getRange(rowIndex, 1, 1, 5).setValues([newRow]);
-      } else {
-        sheet.appendRow(newRow);
-        if (sheet.getLastRow() > 1) {
-          sheet.getRange(2, 1, sheet.getLastRow() - 1, 5).sort({column: 1, ascending: true});
-        }
-      }
-    }
-    
-    return ContentService.createTextOutput("ok");
-  } catch(err) {
-    console.error(err.toString());
-    return ContentService.createTextOutput("");
+  const m = trimmed.match(/^(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})$/);
+  if (m) {
+    const y = m[1];
+    const mo = String(m[2]).padStart(2, '0');
+    const d = String(m[3]).padStart(2, '0');
+    return `${y}-${mo}-${d}`;
   }
+
+  const dt = new Date(trimmed);
+  if (!isNaN(dt.getTime())) {
+    return Utilities.formatDate(dt, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return trimmed;
 }
