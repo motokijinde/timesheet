@@ -10,7 +10,7 @@
  *   - currentData: { 'YYYY-MM-DD': entry } 形式の勤怠データ。 サーバ取得 + 楽観的更新の集合。
  *   - syncQueue:   未送信 / 失敗中の編集キュー。 owner (作成時のユーザー) を保持する。
  *
- * 詳細な設計と修正履歴は code-review.md / fix-plan.md / docs.md を参照。
+ * 詳細な設計は README.md を参照。
  */
 
 // =============================================================================
@@ -455,7 +455,7 @@ function loadSyncQueueFromStorage_() {
 function saveQueue() {
     localStorage.setItem(STORAGE_KEYS.SYNC_QUEUE, JSON.stringify(syncQueue));
     // キュー状態 (⌛/⚠️) を反映するためカレンダーを再描画する。
-    // (差分更新にしたいが現状はフル再描画で許容している。 詳細は code-review.md §6.1)
+    // (差分更新にしたいが現状はフル再描画で許容している)
     initCalendar();
 }
 
