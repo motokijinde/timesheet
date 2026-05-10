@@ -18,7 +18,7 @@
 // =============================================================================
 
 /** GAS ウェブアプリの公開 URL。 デプロイのたびに変わらない (バージョン更新は同 URL)。 */
-const GAS_URL = 'https://script.google.com/macros/s/AKfycby2iRDr_4PABeo5AHDTWFh9PiVgvGSJCIlhu9qwLwgUGMurOL800B8WcwNlpSzmIsLEfA/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbypSu0uWZPSRtAAyctCQE_X7LBPYKv4Bh2Szd7YG4PjAJzPuHevIGpViBkPdPr7hCAfOg/exec';
 
 
 
