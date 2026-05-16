@@ -390,8 +390,10 @@ async function processQueue() {
                     }
                 }
                 saveQueue();
-                // 失敗したらループを抜ける (失敗が連鎖するのを避けるため次のキックに任せる)
-                break;
+                // この日付は失敗扱い (status='failed' で pending フィルタから除外される)。
+                // ループは抜けず次の pending へ進む (別日付を巻き込んで止めない)。
+                // 失敗分の再送は上で仕込んだ backoff (promotePendingAndRun_) に任せる。
+                continue;
             }
         }
     } finally {

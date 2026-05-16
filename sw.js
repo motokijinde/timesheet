@@ -15,7 +15,7 @@
  *   新 SW がアクティブになった瞬間に自動リロードされる。
  */
 
-const CACHE_VERSION = '2.0.1';
+const CACHE_VERSION = '2.0.2';
 const CACHE_NAME = `timesheet-v${CACHE_VERSION}`;
 
 const ASSETS_TO_CACHE = [

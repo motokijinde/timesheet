@@ -201,6 +201,8 @@ processQueue() (排他制御)
     └─ POST to GAS
          ├─ ok=true → キューから除去
          └─ 失敗 → status='failed', retryCount++, バックオフ後に再 promote
+              （ループは中断せず continue。失敗した日付は failed として
+               pending フィルタから外れるので、他日の pending をブロックしない）
 ```
 
 ### 4.3 リトライ・自動再送
